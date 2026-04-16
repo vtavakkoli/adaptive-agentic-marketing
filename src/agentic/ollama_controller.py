@@ -81,7 +81,25 @@ def parse_raw_response(raw_response: str) -> dict[str, Any]:
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
 
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as json_exc:
+        # Fallback parser for non-JSON outputs such as:
+        # selected_action:send_reminder,confidence:0.95,no_action:0.05,rationale:...
+        parts = dict(
+            (
+                match.group(1).strip(),
+                match.group(2).strip(),
+            )
+            for match in re.finditer(
+                r"(selected_action|confidence|no_action|rationale)\s*:\s*(.*?)(?=,\s*(?:selected_action|confidence|no_action|rationale)\s*:|$)",
+                text,
+                re.DOTALL,
+            )
+        )
+        if {"selected_action", "confidence"}.issubset(parts):
+            return parts
+        raise json_exc
 
 
 class OllamaJSONClient:

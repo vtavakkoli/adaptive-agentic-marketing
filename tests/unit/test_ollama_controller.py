@@ -93,3 +93,18 @@ def test_decide_parses_escaped_json_string(monkeypatch) -> None:
     assert out["selected_action"] == "do_nothing"
     assert out["no_action"] is True
     assert out["confidence"] == 0.7
+
+
+def test_decide_parses_key_value_response(monkeypatch) -> None:
+    monkeypatch.setattr(ollama_controller.httpx, "Client", _FakeClient)
+    _FakeClient.response_text = (
+        "selected_action:send_reminder,confidence:0.95,no_action:0.05,"
+        "rationale:The customer has high need and relevance."
+    )
+
+    client = ollama_controller.OllamaJSONClient("http://localhost:11434", "gemma4:e2b", retries=0)
+    out = client.decide({"features": {}, "scores": {}})
+
+    assert out["selected_action"] == "send_reminder"
+    assert out["confidence"] == 0.95
+    assert out["no_action"] is False
