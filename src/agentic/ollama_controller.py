@@ -21,11 +21,24 @@ ALLOWED_ACTIONS = {
 
 def maybe_unescape(text: str) -> str:
     """
-    Decode escaped sequences only when the string still contains
-    literal escape characters like \\n or \\".
+    Decode escaped sequences safely without corrupting multi-byte UTF-8 characters.
     """
+    text = text.strip()
+
+    # If the LLM returned a JSON-encoded string literal (starts and ends with double quotes)
+    if text.startswith('"') and text.endswith('"'):
+        try:
+            parsed = json.loads(text, strict=False)
+            if isinstance(parsed, str):
+                text = parsed
+        except json.JSONDecodeError:
+            pass
+
+    # Safely replace literal escape sequences. Avoids python's unicode_escape, 
+    # which can corrupt legitimate UTF-8 characters.
     if "\\n" in text or '\\"' in text or "\\t" in text or "\\r" in text:
-        return text.encode("utf-8").decode("unicode_escape")
+        text = text.replace("\\n", "\n").replace('\\"', '"').replace("\\t", "\t").replace("\\r", "\r")
+
     return text
 
 
@@ -35,7 +48,8 @@ def strip_code_fences(text: str) -> str:
     the inner JSON text.
     """
     text = text.strip()
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    # Use greedy .* to prevent premature cutoff if `rationale` itself contains code fences.
+    match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
     return text
@@ -75,6 +89,7 @@ def parse_raw_response(raw_response: str) -> dict[str, Any]:
     text = maybe_unescape(text)
     text = strip_code_fences(text)
 
+    # Backup measure to extract raw JSON block by bracing
     if not text.lstrip().startswith("{"):
         start = text.find("{")
         end = text.rfind("}")
@@ -82,22 +97,37 @@ def parse_raw_response(raw_response: str) -> dict[str, Any]:
             text = text[start : end + 1]
 
     try:
-        return json.loads(text)
+        # strict=False allows actual unescaped newlines/tabs inside strings, 
+        # which protects against DecodeErrors after maybe_unescape runs.
+        return json.loads(text, strict=False)
     except json.JSONDecodeError as json_exc:
         # Fallback parser for non-JSON outputs such as:
         # selected_action:send_reminder,confidence:0.95,no_action:0.05,rationale:...
         parts = dict(
             (
                 match.group(1).strip(),
-                match.group(2).strip(),
+                match.group(2).strip().strip('"').strip("'"),
             )
             for match in re.finditer(
                 r"(selected_action|confidence|no_action|rationale)\s*:\s*(.*?)(?=,\s*(?:selected_action|confidence|no_action|rationale)\s*:|$)",
                 text,
-                re.DOTALL,
+                re.DOTALL | re.IGNORECASE,
             )
         )
         if {"selected_action", "confidence"}.issubset(parts):
+            # Attempt typings on extracted raw data
+            if "confidence" in parts:
+                try:
+                    parts["confidence"] = float(parts["confidence"])
+                except ValueError:
+                    pass
+            if "no_action" in parts:
+                lowered = str(parts["no_action"]).strip().lower()
+                if lowered in {"true", "1", "yes"}:
+                    parts["no_action"] = True
+                elif lowered in {"false", "0", "no"}:
+                    parts["no_action"] = False
+                    
             return parts
         raise json_exc
 
@@ -179,52 +209,5 @@ class OllamaJSONClient:
             "llm_request",
             model=self.model,
             case_id=features.get("case_id"),
-            features_keys=sorted(features.keys()) if isinstance(features, dict) else [],
-            scores_keys=sorted(scores.keys()) if isinstance(scores, dict) else [],
-        )
-        for _ in range(self.retries + 1):
-            try:
-                timeout = httpx.Timeout(connect=10.0, read=float(self.timeout_s), write=30.0, pool=10.0)
-                with httpx.Client(timeout=timeout) as client:
-                    response = client.post(
-                        f"{self.base_url}/api/generate",
-                        json={"model": self.model, "prompt": prompt, "stream": False},
-                    )
-                    response.raise_for_status()
-                    response_json = response.json()
-                    text = response_json.get("response", "")
-                    if not isinstance(text, str) or not text.strip():
-                        log_event(
-                            self.logger,
-                            "llm_empty_response",
-                            model=self.model,
-                            response_payload=self._compact_response_payload(response_json),
-                        )
-                        continue
-                    try:
-                        parsed = parse_raw_response(text)
-                    except json.JSONDecodeError as exc:
-                        log_event(
-                            self.logger,
-                            "llm_parse_error",
-                            model=self.model,
-                            error=str(exc),
-                            raw_response=text,
-                            response_payload=self._compact_response_payload(response_json),
-                        )
-                        continue
-                    normalized = self._normalize_decision(parsed)
-                    log_event(self.logger, "llm_response", model=self.model, raw_response=text, parsed_response=normalized)
-                    if "selected_action" in parsed and "confidence" in parsed:
-                        return normalized
-            except Exception as exc:
-                log_event(self.logger, "llm_error", model=self.model, error=str(exc))
-                continue
-        fallback = {
-            "selected_action": "defer_action",
-            "confidence": 0.5,
-            "no_action": False,
-            "rationale": "fallback_due_to_slm_error",
-        }
-        log_event(self.logger, "llm_fallback_response", model=self.model, parsed_response=fallback)
-        return fallback
+            features_keys=sorted(features.keys()) if isinstance(features, dict) else[],
+            scores_keys=sorted(scores.keys()) if isinstance(scores, dict) else
