@@ -1,35 +1,57 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from src.data.prepare import validate_dunnhumby
+from src.utils.logging_utils import configure_logging, log_event
 
 
-def run(cmd: list[str]) -> None:
+def run(cmd: list[str], logger=None, stage: str | None = None) -> None:
+    if logger and stage:
+        log_event(logger, "full_test_stage_start", stage=stage, command=cmd)
     print("$", " ".join(cmd))
-    result = subprocess.run(cmd, check=False)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    result = subprocess.run(cmd, check=False, env=env)
     if result.returncode != 0:
+        if logger and stage:
+            log_event(logger, "full_test_stage_failed", stage=stage, returncode=result.returncode)
         raise SystemExit(result.returncode)
+    if logger and stage:
+        log_event(logger, "full_test_stage_complete", stage=stage)
 
 
-def full_test() -> None:
+def full_test(max_rows: int | None = None) -> None:
+    logger = configure_logging()
     dunnhumby_dir = Path("data/raw/dunnhumby")
     has_real, _ = validate_dunnhumby(dunnhumby_dir)
     dataset = "dunnhumby" if has_real else "synthetic"
-    run([sys.executable, "-m", "src.data.prepare", "--dataset", dataset])
-    run([sys.executable, "-m", "src.training.train_xgboost"])
-    run([sys.executable, "-m", "src.pipeline.run_experiment", "--mode", "all", "--dataset-mode", dataset])
+    log_event(logger, "full_test_start", dataset=dataset, max_rows=max_rows)
+    run([sys.executable, "-m", "src.data.prepare", "--dataset", dataset], logger=logger, stage="prepare_dataset")
+    run([sys.executable, "-m", "src.training.train_xgboost"], logger=logger, stage="train_xgboost")
+    experiment_cmd = [sys.executable, "-m", "src.pipeline.run_experiment", "--mode", "all", "--dataset-mode", dataset]
+    if max_rows is not None:
+        experiment_cmd.extend(["--max-rows", str(max_rows)])
+    run(experiment_cmd, logger=logger, stage="run_experiments")
+    log_event(logger, "full_test_complete", dataset=dataset, max_rows=max_rows)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Adaptive agentic marketing main entrypoint")
     parser.add_argument("--full-test", action="store_true")
+    parser.add_argument("--max-rows", type=int, default=None)
     args = parser.parse_args()
     if args.full_test:
-        full_test()
+        max_rows = args.max_rows
+        if max_rows is None:
+            default_limit = os.getenv("FULL_TEST_MAX_ROWS", "10").strip()
+            if default_limit and default_limit.lower() != "all":
+                max_rows = int(default_limit)
+        full_test(max_rows=max_rows)
     else:
         parser.print_help()
 

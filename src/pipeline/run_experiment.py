@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import pandas as pd
 
 from src.agentic.controller import AdaptiveAgenticController
 from src.config import load_yaml
-from src.evaluation.metrics import evaluate_predictions, timed_decisions
+from src.evaluation.metrics import evaluate_predictions
 from src.evaluation.report import write_reports
 from src.utils.logging_utils import configure_logging, log_event
 
@@ -24,10 +25,23 @@ MODES = [
 ]
 
 
-def run_experiment(mode: str, test_df: pd.DataFrame, cfg: dict) -> tuple[list[dict], dict]:
+def run_experiment(
+    mode: str,
+    test_df: pd.DataFrame,
+    cfg: dict,
+    logger=None,
+    progress_every: int = 1,
+) -> tuple[list[dict], dict]:
     controller = AdaptiveAgenticController(cfg)
     rows = test_df.to_dict(orient="records")
-    preds, elapsed = timed_decisions(lambda r: controller.decide(r, mode=mode), rows)
+    total = len(rows)
+    preds: list[dict] = []
+    start = time.perf_counter()
+    for idx, row in enumerate(rows, start=1):
+        preds.append(controller.decide(row, mode=mode))
+        if logger and (idx % progress_every == 0 or idx == total):
+            log_event(logger, "mode_progress", mode=mode, processed=idx, total=total)
+    elapsed = time.perf_counter() - start
     metrics = evaluate_predictions(test_df, preds, elapsed)
     return preds, metrics
 
@@ -38,17 +52,22 @@ def main() -> None:
     parser.add_argument("--test-path", default="data/processed/test.csv")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--dataset-mode", default="synthetic")
+    parser.add_argument("--max-rows", type=int, default=None)
     args = parser.parse_args()
 
     logger = configure_logging()
     cfg = load_yaml(args.config)
     test_df = pd.read_csv(args.test_path)
+    if args.max_rows is not None:
+        test_df = test_df.head(args.max_rows).copy()
+    log_event(logger, "experiment_dataset_loaded", rows=len(test_df), max_rows=args.max_rows)
 
     modes = MODES if args.mode == "all" else [args.mode]
     all_metrics: dict[str, dict] = {}
     example_preds: list[dict] = []
     for mode in modes:
-        preds, metrics = run_experiment(mode, test_df, cfg)
+        log_event(logger, "mode_start", mode=mode)
+        preds, metrics = run_experiment(mode, test_df, cfg, logger=logger)
         all_metrics[mode] = metrics
         if not example_preds:
             example_preds = preds

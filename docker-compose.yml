@@ -31,6 +31,7 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FULL_TEST_MAX_ROWS: ${FULL_TEST_MAX_ROWS:-10}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
