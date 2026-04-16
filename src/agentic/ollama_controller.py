@@ -9,7 +9,7 @@ from src.utils.logging_utils import configure_logging, log_event
 
 
 class OllamaJSONClient:
-    def __init__(self, base_url: str, model: str, timeout_s: int = 20, retries: int = 2) -> None:
+    def __init__(self, base_url: str, model: str, timeout_s: int = 90, retries: int = 2) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_s = timeout_s
@@ -25,14 +25,35 @@ class OllamaJSONClient:
         log_event(self.logger, "llm_request", model=self.model, payload=payload, prompt=prompt)
         for _ in range(self.retries + 1):
             try:
-                with httpx.Client(timeout=self.timeout_s) as client:
+                timeout = httpx.Timeout(connect=10.0, read=float(self.timeout_s), write=30.0, pool=10.0)
+                with httpx.Client(timeout=timeout) as client:
                     response = client.post(
                         f"{self.base_url}/api/generate",
                         json={"model": self.model, "prompt": prompt, "stream": False},
                     )
                     response.raise_for_status()
-                    text = response.json().get("response", "{}")
-                    parsed = json.loads(text)
+                    response_json = response.json()
+                    text = response_json.get("response", "")
+                    if not isinstance(text, str) or not text.strip():
+                        log_event(
+                            self.logger,
+                            "llm_empty_response",
+                            model=self.model,
+                            response_payload=response_json,
+                        )
+                        continue
+                    try:
+                        parsed = json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        log_event(
+                            self.logger,
+                            "llm_parse_error",
+                            model=self.model,
+                            error=str(exc),
+                            raw_response=text[:4000],
+                            response_payload=response_json,
+                        )
+                        continue
                     log_event(self.logger, "llm_response", model=self.model, raw_response=text, parsed_response=parsed)
                     if "selected_action" in parsed and "confidence" in parsed:
                         return parsed
