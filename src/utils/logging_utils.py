@@ -32,3 +32,16 @@ def log_event(logger: logging.Logger, event: str, **payload: object) -> None:
         **payload,
     }
     logger.info(json.dumps(record, default=str))
+
+
+def append_jsonl_log(log_path: str, event: str, **payload: object) -> None:
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        **payload,
+    }
+    path = Path(log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, default=str))
+        handle.write("\n")

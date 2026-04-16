@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from src.utils.logging_utils import configure_logging, log_event
+from src.utils.logging_utils import append_jsonl_log, configure_logging, log_event
 
 ALLOWED_ACTIONS = {
     "recommend_offer_a",
@@ -133,6 +133,7 @@ class OllamaJSONClient:
         self.timeout_s = timeout_s
         self.retries = retries
         self.logger = configure_logging()
+        self.llm_log_path = "outputs/logs/llm.log"
 
     def _sanitize_for_json(self, value: Any) -> Any:
         if isinstance(value, dict):
@@ -211,18 +212,35 @@ class OllamaJSONClient:
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
+                request_payload = {
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                }
+                append_jsonl_log(
+                    self.llm_log_path,
+                    "llm_raw_request",
+                    model=self.model,
+                    attempt=attempt,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    payload=request_payload,
+                )
                 with httpx.Client(timeout=self.timeout_s) as client:
                     response = client.post(
                         f"{self.base_url}/api/generate",
-                        json={
-                            "model": self.model,
-                            "prompt": prompt,
-                            "stream": False,
-                            "format": "json",
-                        },
+                        json=request_payload,
                     )
                     response.raise_for_status()
                     response_payload = response.json()
+                append_jsonl_log(
+                    self.llm_log_path,
+                    "llm_raw_response",
+                    model=self.model,
+                    attempt=attempt,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    payload=response_payload,
+                )
 
                 log_event(
                     self.logger,
