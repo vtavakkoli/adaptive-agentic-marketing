@@ -42,6 +42,17 @@ ollama pull gemma4:e2b
 ```
 Docker services connect to host Ollama via `http://host.docker.internal:11434`.
 
+## Environment variables (.env optional)
+Docker Compose now uses safe defaults, so a `.env` file is **not required**.  
+If you want custom values, copy `.env.example` to `.env` and edit:
+```bash
+cp .env.example .env
+```
+On Windows PowerShell:
+```powershell
+Copy-Item .env.example .env
+```
+
 ## Build
 ```bash
 docker compose build
