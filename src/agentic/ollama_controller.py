@@ -32,8 +32,28 @@ class OllamaJSONClient:
                         json={"model": self.model, "prompt": prompt, "stream": False},
                     )
                     response.raise_for_status()
-                    text = response.json().get("response", "{}")
-                    parsed = json.loads(text)
+                    response_json = response.json()
+                    text = response_json.get("response", "")
+                    if not isinstance(text, str) or not text.strip():
+                        log_event(
+                            self.logger,
+                            "llm_empty_response",
+                            model=self.model,
+                            response_payload=response_json,
+                        )
+                        continue
+                    try:
+                        parsed = json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        log_event(
+                            self.logger,
+                            "llm_parse_error",
+                            model=self.model,
+                            error=str(exc),
+                            raw_response=text[:4000],
+                            response_payload=response_json,
+                        )
+                        continue
                     log_event(self.logger, "llm_response", model=self.model, raw_response=text, parsed_response=parsed)
                     if "selected_action" in parsed and "confidence" in parsed:
                         return parsed
