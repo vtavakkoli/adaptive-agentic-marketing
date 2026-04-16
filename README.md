@@ -86,9 +86,8 @@ python -m src.pipeline.run_experiment --mode adaptive_full_framework
 ```
 
 `run_experiment` is a convenience Docker Compose service that assumes prepared data already exists, then:
-1. trains XGBoost,
-2. rebuilds the coverage evaluation set (`artifacts/coverage_test_set.csv`), and
-3. runs `adaptive_full_framework` on the coverage set.
+1. runs `adaptive_full_framework` on the coverage evaluation set, and
+2. generates experiment reports in `outputs/reports/`.
 
 ## Full end-to-end test
 ```bash

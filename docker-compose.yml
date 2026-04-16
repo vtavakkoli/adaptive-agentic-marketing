@@ -74,13 +74,8 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      COVERAGE_TARGET_SIZE: ${COVERAGE_TARGET_SIZE:-100}
-      COVERAGE_SEED: ${COVERAGE_SEED:-42}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
-    command: >
-      sh -c "python -m src.training.train_xgboost &&
-      python -m src.data.coverage --input data/processed/test.csv --output artifacts/coverage_test_set.csv --summary-output artifacts/coverage_summary.json --target-size ${COVERAGE_TARGET_SIZE} --seed ${COVERAGE_SEED} &&
-      python -m src.pipeline.run_experiment --mode adaptive_full_framework --evaluation-set coverage"
+    command: python -m src.pipeline.run_experiment --mode adaptive_full_framework --evaluation-set coverage
