@@ -1,0 +1,9 @@
+modes:
+  - rules_only
+  - xgboost_only
+  - slm_only
+  - adaptive_full_framework
+  - ablation_no_rules
+  - ablation_no_xgboost
+  - ablation_no_explanation
+  - ablation_no_content_generation
