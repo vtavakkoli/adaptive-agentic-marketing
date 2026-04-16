@@ -76,6 +76,7 @@ Docker Compose:
 ```bash
 docker compose run --rm app python -m src.training.train_xgboost
 docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_full_framework
+docker compose run --rm run_experiment
 ```
 
 Equivalent local Python:
@@ -83,6 +84,10 @@ Equivalent local Python:
 python -m src.training.train_xgboost
 python -m src.pipeline.run_experiment --mode adaptive_full_framework
 ```
+
+`run_experiment` is a convenience Docker Compose service that assumes prepared data already exists, then:
+1. runs `adaptive_full_framework` on the coverage evaluation set, and
+2. generates experiment reports in `outputs/reports/`.
 
 ## Full end-to-end test
 ```bash
