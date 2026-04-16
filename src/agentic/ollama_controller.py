@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from src.utils.logging_utils import configure_logging, log_event
+from src.utils.logging_utils import append_jsonl_log, configure_logging, log_event
 
 ALLOWED_ACTIONS = {
     "recommend_offer_a",
@@ -18,6 +18,7 @@ ALLOWED_ACTIONS = {
     "do_nothing",
 }
 
+
 def maybe_unescape(text: str) -> str:
     """
     Decode escaped sequences safely, avoiding corruption of valid JSON and UTF-8 characters.
@@ -25,9 +26,9 @@ def maybe_unescape(text: str) -> str:
     """
     if not isinstance(text, str):
         return text
-        
+
     text = text.strip()
-    
+
     # If wrapped completely in a JSON string literal (e.g., "\"{\\n...}\"")
     if text.startswith('"') and text.endswith('"'):
         try:
@@ -36,12 +37,13 @@ def maybe_unescape(text: str) -> str:
                 text = parsed
         except Exception:
             pass
-            
+
     # If the text has literal backslash-quotes and NO real quotes, it is fully over-escaped.
     if '\\"' in text and '"' not in text.replace('\\"', ''):
         text = text.replace('\\"', '"').replace('\\n', '\n')
-        
+
     return text
+
 
 def strip_code_fences(text: str) -> str:
     """
@@ -49,17 +51,17 @@ def strip_code_fences(text: str) -> str:
     the inner JSON text without truncating nested braces.
     """
     text = text.strip()
-    # Corrected regex to match between actual markdown backticks
     match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
-        
+
     # Fallback to remove malformed backticks
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
-        
+
     return text.strip()
+
 
 def normalize_no_action(value: Any, selected_action: str | None = None) -> bool:
     """
@@ -83,16 +85,16 @@ def normalize_no_action(value: Any, selected_action: str | None = None) -> bool:
 
     return False
 
+
 def parse_raw_response(raw_response: str) -> dict[str, Any]:
     """
     Parse an LLM response that may contain:
-    - escaped characters like \\n and \\"
+    - escaped characters like \\n and \\
     - fenced markdown ```json ... ```
     - non-boolean no_action values
     """
     text = raw_response.strip()
-    
-    # Execute strip_code_fences first so maybe_unescape receives the inner string
+
     text = strip_code_fences(text)
     text = maybe_unescape(text)
 
@@ -131,6 +133,7 @@ class OllamaJSONClient:
         self.timeout_s = timeout_s
         self.retries = retries
         self.logger = configure_logging()
+        self.llm_log_path = "outputs/logs/llm.log"
 
     def _sanitize_for_json(self, value: Any) -> Any:
         if isinstance(value, dict):
@@ -194,12 +197,93 @@ class OllamaJSONClient:
             "Return only JSON without markdown code fences. "
             f"Input={json.dumps(safe_payload, allow_nan=False)}"
         )
+
         features = safe_payload.get("features", {}) if isinstance(safe_payload, dict) else {}
         scores = safe_payload.get("scores", {}) if isinstance(safe_payload, dict) else {}
         log_event(
             self.logger,
             "llm_request",
             model=self.model,
-            case_id=features.get("case_id"),
-            features_keys=sorted(features.keys()) if isinstance(features, dict) else[],
-            scores_keys=sorted(scores.keys()) if isinstance(scores, dict) else
+            case_id=features.get("case_id") if isinstance(features, dict) else None,
+            features_keys=sorted(features.keys()) if isinstance(features, dict) else [],
+            scores_keys=sorted(scores.keys()) if isinstance(scores, dict) else [],
+        )
+
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                request_payload = {
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                }
+                append_jsonl_log(
+                    self.llm_log_path,
+                    "llm_raw_request",
+                    model=self.model,
+                    attempt=attempt,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    payload=request_payload,
+                )
+                with httpx.Client(timeout=self.timeout_s) as client:
+                    response = client.post(
+                        f"{self.base_url}/api/generate",
+                        json=request_payload,
+                    )
+                    response.raise_for_status()
+                    response_payload = response.json()
+                append_jsonl_log(
+                    self.llm_log_path,
+                    "llm_raw_response",
+                    model=self.model,
+                    attempt=attempt,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    payload=response_payload,
+                )
+
+                log_event(
+                    self.logger,
+                    "llm_response",
+                    model=self.model,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    attempt=attempt,
+                    payload=self._compact_response_payload(response_payload),
+                )
+
+                parsed = parse_raw_response(str(response_payload.get("response", "")).strip())
+                return self._normalize_decision(parsed)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                last_error = exc
+                log_event(
+                    self.logger,
+                    "llm_parse_error",
+                    model=self.model,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+            except httpx.HTTPError as exc:
+                last_error = exc
+                log_event(
+                    self.logger,
+                    "llm_http_error",
+                    model=self.model,
+                    case_id=features.get("case_id") if isinstance(features, dict) else None,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+
+        log_event(
+            self.logger,
+            "llm_fallback_decision",
+            model=self.model,
+            case_id=features.get("case_id") if isinstance(features, dict) else None,
+            error=str(last_error) if last_error else "unknown_error",
+        )
+        return {
+            "selected_action": "defer_action",
+            "confidence": 0.0,
+            "no_action": False,
+            "rationale": "fallback_due_to_slm_error",
+        }
