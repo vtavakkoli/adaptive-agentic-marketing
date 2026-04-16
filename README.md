@@ -90,6 +90,19 @@ docker compose run --rm full-test
 ```
 This verifies environment assumptions, picks real-data mode when available, otherwise synthetic mode, then preprocesses, derives labels, trains XGBoost, runs all experiment modes, calls the host Ollama SLM endpoint, computes metrics, and generates reports.
 
+By default, full test experiments run on **10 rows** for quick feedback and visible progress logs.  
+You can increase or disable the cap later:
+```bash
+# run 50 rows
+docker compose run --rm -e FULL_TEST_MAX_ROWS=50 full-test
+
+# run the full test set
+docker compose run --rm -e FULL_TEST_MAX_ROWS=all full-test
+```
+
+LLM request/response payloads and stage progress are written to:
+- `outputs/logs/app.log`
+
 ## API
 ```bash
 docker compose up api

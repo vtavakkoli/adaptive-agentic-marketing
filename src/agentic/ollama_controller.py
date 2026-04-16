@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from src.utils.logging_utils import configure_logging, log_event
+
 
 class OllamaJSONClient:
     def __init__(self, base_url: str, model: str, timeout_s: int = 20, retries: int = 2) -> None:
@@ -12,6 +14,7 @@ class OllamaJSONClient:
         self.model = model
         self.timeout_s = timeout_s
         self.retries = retries
+        self.logger = configure_logging()
 
     def decide(self, payload: dict[str, Any]) -> dict[str, Any]:
         prompt = (
@@ -19,6 +22,7 @@ class OllamaJSONClient:
             "Allowed actions: recommend_offer_a,recommend_offer_b,send_information,send_reminder,defer_action,do_nothing. "
             f"Input={json.dumps(payload)}"
         )
+        log_event(self.logger, "llm_request", model=self.model, payload=payload, prompt=prompt)
         for _ in range(self.retries + 1):
             try:
                 with httpx.Client(timeout=self.timeout_s) as client:
@@ -29,13 +33,17 @@ class OllamaJSONClient:
                     response.raise_for_status()
                     text = response.json().get("response", "{}")
                     parsed = json.loads(text)
+                    log_event(self.logger, "llm_response", model=self.model, raw_response=text, parsed_response=parsed)
                     if "selected_action" in parsed and "confidence" in parsed:
                         return parsed
-            except Exception:
+            except Exception as exc:
+                log_event(self.logger, "llm_error", model=self.model, error=str(exc))
                 continue
-        return {
+        fallback = {
             "selected_action": "defer_action",
             "confidence": 0.5,
             "no_action": False,
             "rationale": "fallback_due_to_slm_error",
         }
+        log_event(self.logger, "llm_fallback_response", model=self.model, parsed_response=fallback)
+        return fallback
