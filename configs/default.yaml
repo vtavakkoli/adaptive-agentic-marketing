@@ -1,0 +1,12 @@
+model_path: outputs/models/xgboost.joblib
+rules:
+  frequency_cap_7d: 5
+  fatigue_do_nothing_threshold: 0.7
+  min_relevance_threshold: 0.35
+  invalid_offers: ["offer_expired"]
+slm:
+  enabled: true
+  base_url: http://host.docker.internal:11434
+  model: gemma4:e2b
+  timeout_s: 20
+  retries: 2
