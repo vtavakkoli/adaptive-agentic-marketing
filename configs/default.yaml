@@ -8,5 +8,5 @@ slm:
   enabled: true
   base_url: http://host.docker.internal:11434
   model: gemma4:e2b
-  timeout_s: 20
+  timeout_s: 90
   retries: 2

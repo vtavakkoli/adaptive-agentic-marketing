@@ -25,7 +25,7 @@ class AdaptiveAgenticController:
         self.ollama = OllamaJSONClient(
             base_url=os.getenv("OLLAMA_BASE_URL", policy_cfg.get("slm", {}).get("base_url", "http://host.docker.internal:11434")),
             model=policy_cfg.get("slm", {}).get("model", "gemma4:e2b"),
-            timeout_s=int(policy_cfg.get("slm", {}).get("timeout_s", 20)),
+            timeout_s=int(policy_cfg.get("slm", {}).get("timeout_s", 90)),
             retries=int(policy_cfg.get("slm", {}).get("retries", 2)),
         )
 
