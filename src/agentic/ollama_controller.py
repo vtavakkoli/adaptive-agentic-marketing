@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
 import httpx
@@ -16,6 +17,71 @@ ALLOWED_ACTIONS = {
     "defer_action",
     "do_nothing",
 }
+
+
+def maybe_unescape(text: str) -> str:
+    """
+    Decode escaped sequences only when the string still contains
+    literal escape characters like \\n or \\".
+    """
+    if "\\n" in text or '\\"' in text or "\\t" in text or "\\r" in text:
+        return text.encode("utf-8").decode("unicode_escape")
+    return text
+
+
+def strip_code_fences(text: str) -> str:
+    """
+    Remove Markdown code fences such as ```json ... ``` and return
+    the inner JSON text.
+    """
+    text = text.strip()
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text
+
+
+def normalize_no_action(value: Any, selected_action: str | None = None) -> bool:
+    """
+    Normalize no_action to a strict boolean.
+    """
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return value >= 0.5
+
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+
+    if selected_action is not None:
+        return selected_action == "do_nothing"
+
+    return False
+
+
+def parse_raw_response(raw_response: str) -> dict[str, Any]:
+    """
+    Parse an LLM response that may contain:
+    - escaped characters like \\n and \\"
+    - fenced markdown ```json ... ```
+    - non-boolean no_action values
+    """
+    text = raw_response.strip()
+    text = maybe_unescape(text)
+    text = strip_code_fences(text)
+
+    if not text.lstrip().startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+
+    return json.loads(text)
 
 
 class OllamaJSONClient:
@@ -36,26 +102,26 @@ class OllamaJSONClient:
         return value
 
     def _compact_response_payload(self, response_payload: dict[str, Any]) -> dict[str, Any]:
-        compact = {k: v for k, v in response_payload.items() if k not in {"context", "response"}}
+        compact = {
+            k: v
+            for k, v in response_payload.items()
+            if k
+            in {
+                "model",
+                "created_at",
+                "done",
+                "done_reason",
+                "total_duration",
+                "load_duration",
+                "prompt_eval_count",
+                "prompt_eval_duration",
+                "eval_count",
+                "eval_duration",
+            }
+        }
         response_text = response_payload.get("response", "")
-        compact["response_preview"] = response_text[:500] if isinstance(response_text, str) else ""
+        compact["response_preview"] = response_text[:300] if isinstance(response_text, str) else ""
         return compact
-
-    def _extract_json(self, text: str) -> str:
-        stripped = text.strip()
-        if stripped.startswith("```"):
-            lines = stripped.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            stripped = "\n".join(lines).strip()
-
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return stripped[start : end + 1]
-        return stripped
 
     def _normalize_decision(self, parsed: dict[str, Any]) -> dict[str, Any]:
         action = str(parsed.get("selected_action", "defer_action"))
@@ -69,10 +135,7 @@ class OllamaJSONClient:
         confidence = max(0.0, min(1.0, confidence))
 
         raw_no_action = parsed.get("no_action", action == "do_nothing")
-        if isinstance(raw_no_action, str):
-            no_action = raw_no_action.strip().lower() in {"true", "1", "yes"}
-        else:
-            no_action = bool(raw_no_action)
+        no_action = normalize_no_action(raw_no_action, selected_action=action)
 
         rationale = str(parsed.get("rationale", "")).strip() or "model_response"
 
@@ -91,7 +154,16 @@ class OllamaJSONClient:
             "Return only JSON without markdown code fences. "
             f"Input={json.dumps(safe_payload, allow_nan=False)}"
         )
-        log_event(self.logger, "llm_request", model=self.model, payload=safe_payload, prompt=prompt)
+        features = safe_payload.get("features", {}) if isinstance(safe_payload, dict) else {}
+        scores = safe_payload.get("scores", {}) if isinstance(safe_payload, dict) else {}
+        log_event(
+            self.logger,
+            "llm_request",
+            model=self.model,
+            case_id=features.get("case_id"),
+            features_keys=sorted(features.keys()) if isinstance(features, dict) else [],
+            scores_keys=sorted(scores.keys()) if isinstance(scores, dict) else [],
+        )
         for _ in range(self.retries + 1):
             try:
                 timeout = httpx.Timeout(connect=10.0, read=float(self.timeout_s), write=30.0, pool=10.0)
@@ -112,19 +184,19 @@ class OllamaJSONClient:
                         )
                         continue
                     try:
-                        parsed = json.loads(self._extract_json(text))
+                        parsed = parse_raw_response(text)
                     except json.JSONDecodeError as exc:
                         log_event(
                             self.logger,
                             "llm_parse_error",
                             model=self.model,
                             error=str(exc),
-                            raw_response=text[:4000],
+                            raw_response=text,
                             response_payload=self._compact_response_payload(response_json),
                         )
                         continue
                     normalized = self._normalize_decision(parsed)
-                    log_event(self.logger, "llm_response", model=self.model, raw_response=text[:4000], parsed_response=normalized)
+                    log_event(self.logger, "llm_response", model=self.model, raw_response=text, parsed_response=normalized)
                     if "selected_action" in parsed and "confidence" in parsed:
                         return normalized
             except Exception as exc:

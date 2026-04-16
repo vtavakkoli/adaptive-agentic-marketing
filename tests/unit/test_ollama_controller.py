@@ -81,3 +81,15 @@ def test_decide_sanitizes_nan_in_prompt_payload(monkeypatch) -> None:
     assert _FakeClient.last_payload is not None
     prompt = _FakeClient.last_payload["prompt"]
     assert "NaN" not in prompt
+
+
+def test_decide_parses_escaped_json_string(monkeypatch) -> None:
+    monkeypatch.setattr(ollama_controller.httpx, "Client", _FakeClient)
+    _FakeClient.response_text = '{\\n  \\"selected_action\\": \\"do_nothing\\",\\n  \\"confidence\\": 0.7,\\n  \\"no_action\\": 1,\\n  \\"rationale\\": \\"escaped\\"\\n}'
+
+    client = ollama_controller.OllamaJSONClient("http://localhost:11434", "gemma4:e2b", retries=0)
+    out = client.decide({"features": {}, "scores": {}})
+
+    assert out["selected_action"] == "do_nothing"
+    assert out["no_action"] is True
+    assert out["confidence"] == 0.7
