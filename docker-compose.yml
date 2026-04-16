@@ -31,9 +31,39 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      FULL_TEST_MAX_ROWS: ${FULL_TEST_MAX_ROWS:-10}
+      FULL_TEST_MAX_ROWS: ${FULL_TEST_MAX_ROWS:-all}
+      FULL_TEST_MODE: ${FULL_TEST_MODE:-coverage}
+      FULL_TEST_SEED: ${FULL_TEST_SEED:-42}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
     command: python -m src.main --full-test
+
+  full-test-original:
+    build: .
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FULL_TEST_MAX_ROWS: ${FULL_TEST_MAX_ROWS:-all}
+      FULL_TEST_SEED: ${FULL_TEST_SEED:-42}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./:/app
+    command: python -m src.main --full-test --full-test-mode original
+
+  full-test-coverage:
+    build: .
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FULL_TEST_MAX_ROWS: ${FULL_TEST_MAX_ROWS:-all}
+      FULL_TEST_SEED: ${FULL_TEST_SEED:-42}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./:/app
+    command: python -m src.main --full-test --full-test-mode coverage
