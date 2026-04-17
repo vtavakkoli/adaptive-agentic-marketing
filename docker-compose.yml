@@ -78,4 +78,4 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
-    command: python -m src.pipeline.run_experiment --mode adaptive_full_framework --evaluation-set coverage
+    command: python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --evaluation-set coverage --report --calibrate

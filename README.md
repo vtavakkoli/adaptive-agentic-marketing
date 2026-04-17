@@ -75,18 +75,18 @@ python -m src.data.prepare --dataset synthetic
 Docker Compose:
 ```bash
 docker compose run --rm app python -m src.training.train_xgboost
-docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_full_framework
+docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_simple
 docker compose run --rm run_experiment
 ```
 
 Equivalent local Python:
 ```bash
 python -m src.training.train_xgboost
-python -m src.pipeline.run_experiment --mode adaptive_full_framework
+python -m src.pipeline.run_experiment --mode adaptive_simple
 ```
 
 `run_experiment` is a convenience Docker Compose service that assumes prepared data already exists, then:
-1. runs `adaptive_full_framework` on the coverage evaluation set, and
+1. runs `adaptive_simple` on the coverage evaluation set, and
 2. generates experiment reports in `outputs/reports/`.
 
 ## Full end-to-end test
@@ -170,3 +170,17 @@ curl -X POST http://localhost:8000/decide -H 'content-type: application/json' -d
 - `outputs/reports/metrics.json`
 - `outputs/reports/summary.csv`
 - `outputs/reports/final_report.html`
+
+
+## Adaptive hierarchical framework (new primary mode)
+
+- Baseline rename: `adaptive_simple` is the previous flat `adaptive_full` implementation.
+- New mode: `adaptive_hierarchical` adds hierarchical Stage A/Stage B selection, cost-sensitive control, calibrated uncertainty fallback, and hard guardrails.
+
+Run the new framework:
+
+```bash
+python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --seeds 3 --report --calibrate
+```
+
+Migration note: internal alias `adaptive_full -> adaptive_simple` remains for compatibility, but reports and CLI now use `adaptive_simple`.

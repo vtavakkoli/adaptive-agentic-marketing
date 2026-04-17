@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.agentic.controller import AdaptiveAgenticController
+from src.agentic.controller import AdaptiveAgenticController, MODE_ALIASES
 from src.config import load_yaml
+from src.data.feature_builder import build_features
+from src.data.label_audit import feature_audit, run_label_audit
 from src.evaluation.metrics import evaluate_predictions
 from src.evaluation.report import write_reports
 from src.utils.logging_utils import configure_logging, log_event
@@ -17,7 +19,8 @@ MODES = [
     "rules_only",
     "xgboost_only",
     "slm_only",
-    "adaptive_full_framework",
+    "adaptive_simple",
+    "adaptive_hierarchical",
     "ablation_no_rules",
     "ablation_no_xgboost",
     "ablation_no_explanation",
@@ -32,6 +35,7 @@ def run_experiment(
     logger=None,
     progress_every: int = 1,
 ) -> tuple[list[dict], dict]:
+    mode = MODE_ALIASES.get(mode, mode)
     controller = AdaptiveAgenticController(cfg)
     rows = test_df.to_dict(orient="records")
     total = len(rows)
@@ -43,6 +47,8 @@ def run_experiment(
             log_event(logger, "mode_progress", mode=mode, processed=idx, total=total)
     elapsed = time.perf_counter() - start
     metrics = evaluate_predictions(test_df, preds, elapsed)
+    metrics["label_audit"] = run_label_audit(build_features(test_df))
+    metrics["feature_audit"] = feature_audit(build_features(test_df), pd.DataFrame(preds))
     return preds, metrics
 
 
@@ -56,13 +62,16 @@ def _resolve_eval_sets(args: argparse.Namespace) -> dict[str, Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run adaptive marketing experiments")
-    parser.add_argument("--mode", default="adaptive_full_framework", choices=MODES + ["all"])
+    parser.add_argument("--mode", default="adaptive_hierarchical", choices=MODES + ["all", "adaptive_full"])
     parser.add_argument("--test-path", default="data/processed/test.csv")
     parser.add_argument("--coverage-test-path", default="artifacts/coverage_test_set.csv")
     parser.add_argument("--evaluation-set", default="coverage", choices=["coverage", "original", "both"])
-    parser.add_argument("--config", default="configs/default.yaml")
+    parser.add_argument("--config", default="configs/adaptive_hierarchical.yaml")
     parser.add_argument("--dataset-mode", default="synthetic")
     parser.add_argument("--max-rows", type=int, default=None)
+    parser.add_argument("--seeds", type=int, default=1)
+    parser.add_argument("--report", action="store_true")
+    parser.add_argument("--calibrate", action="store_true")
     args = parser.parse_args()
 
     logger = configure_logging()
@@ -86,7 +95,8 @@ def main() -> None:
             max_rows=args.max_rows,
         )
 
-    modes = MODES if args.mode == "all" else [args.mode]
+    requested_mode = MODE_ALIASES.get(args.mode, args.mode)
+    modes = MODES if requested_mode == "all" else [requested_mode]
     all_metrics: dict[str, dict] = {}
     dataset_summary: dict[str, dict[str, str | int]] = {}
 
@@ -99,10 +109,14 @@ def main() -> None:
             metric_key = f"{mode}__{eval_name}"
             log_event(logger, "mode_start", mode=mode, evaluation_set=eval_name)
             preds, metrics = run_experiment(mode, test_df, cfg, logger=logger)
+            metrics["calibration_enabled"] = bool(args.calibrate)
+            metrics["seeds"] = int(args.seeds)
             all_metrics[metric_key] = {**metrics, "evaluation_set": eval_name}
             if not example_preds:
                 example_preds = preds
-            pd.DataFrame(preds).to_csv(f"outputs/predictions/{metric_key}.csv", index=False)
+            pred_dir = Path("outputs/predictions") / mode / eval_name
+            pred_dir.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(preds).to_csv(pred_dir / "predictions.csv", index=False)
             log_event(
                 logger,
                 "experiment_complete",
@@ -113,20 +127,24 @@ def main() -> None:
                 rule_violation_rate=metrics.get("rule_violation_rate"),
             )
 
-    write_reports(
-        Path("outputs/reports"),
-        all_metrics,
-        dataset_mode=args.dataset_mode,
-        dataset_summary={
-            "dataset_mode": args.dataset_mode,
-            "evaluation_set": args.evaluation_set,
-            "sets": dataset_summary,
-        },
-        feature_summary={
-            eval_name: {"features": list(df.columns), "rows": len(df)} for eval_name, df in loaded_datasets.items()
-        },
-        example_decisions=example_preds,
-    )
+    if args.report or True:
+        write_reports(
+            Path("outputs/reports"),
+            all_metrics,
+            dataset_mode=args.dataset_mode,
+            dataset_summary={
+                "dataset_mode": args.dataset_mode,
+                "evaluation_set": args.evaluation_set,
+                "sets": dataset_summary,
+                "seed": args.seeds,
+                "config_path": args.config,
+                "mode": requested_mode,
+            },
+            feature_summary={
+                eval_name: {"features": list(df.columns), "rows": len(df)} for eval_name, df in loaded_datasets.items()
+            },
+            example_decisions=example_preds,
+        )
     print(json.dumps(all_metrics, indent=2))
 
 
