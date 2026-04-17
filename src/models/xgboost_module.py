@@ -38,13 +38,14 @@ class XGBoostModule:
         self.model.fit(df[FEATURES], df[TARGETS[0]])
 
     def predict_scores(self, df: pd.DataFrame) -> pd.DataFrame:
-        prob = self.model.predict_proba(df[FEATURES])[:, 1]
+        contact_risk = self.model.predict_proba(df[FEATURES])[:, 1]
+        response_propensity = (
+            0.6 * df["prior_response_rate"].astype(float) + 0.4 * (1.0 - contact_risk)
+        ).clip(0, 1)
         return pd.DataFrame(
             {
-                "fatigue_risk_pred": prob,
-                "intrusion_risk_pred": (prob * 0.9).clip(0, 1),
-                "response_likelihood_pred": (1 - prob).clip(0, 1),
-                "offer_relevance_pred": (0.7 * df["offer_relevance"] + 0.3 * (1 - prob)).clip(0, 1),
+                "contact_risk_pred": contact_risk,
+                "response_propensity_pred": response_propensity,
             }
         )
 

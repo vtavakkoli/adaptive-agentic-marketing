@@ -5,12 +5,10 @@ import pandas as pd
 
 
 ACTION_ORDER = [
-    "recommend_offer_a",
-    "recommend_offer_b",
+    "do_nothing",
+    "defer_action",
     "send_information",
     "send_reminder",
-    "defer_action",
-    "do_nothing",
 ]
 
 
@@ -33,12 +31,10 @@ def derive_labels(df: pd.DataFrame) -> pd.DataFrame:
     out["action_class"] = np.select(
         [
             out["no_action_preferred"] == 1,
-            out["offer_relevance"] > 0.75,
-            (out["offer_relevance"] > 0.6) & (out["offer_id"].eq("offer_b")),
-            out["need_score"] > 0.65,
-            out["need_score"] > 0.45,
+            out["need_score"] > 0.70,
+            (out["need_score"] > 0.45) & (out["offer_relevance"] > 0.45),
         ],
-        ["do_nothing", "recommend_offer_a", "recommend_offer_b", "send_reminder", "send_information"],
+        ["do_nothing", "send_reminder", "send_information"],
         default="defer_action",
     )
     return out
