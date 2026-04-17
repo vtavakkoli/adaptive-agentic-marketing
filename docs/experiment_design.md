@@ -4,7 +4,7 @@ Supported modes:
 - rules_only
 - xgboost_only
 - slm_only
-- adaptive_simple
+- adaptive_framework
 - ablation_no_rules
 - ablation_no_xgboost
 - ablation_no_explanation
