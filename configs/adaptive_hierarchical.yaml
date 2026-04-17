@@ -1,0 +1,51 @@
+model_path: outputs/models/xgboost.joblib
+features:
+  enable_reminder_features: true
+  enable_defer_features: true
+  enable_temporal_features: true
+labels:
+  do_nothing: "no outreach should occur now"
+  defer_action: "outreach may be useful later but not now"
+  send_information: "low-pressure informational outreach appropriate now"
+  send_reminder: "reminder outreach with prerequisites"
+  reminder_prerequisites:
+    requires_prior_exposure: true
+    requires_intent_signal: true
+models:
+  stage_a:
+    type: sklearn_hist_gradient_boosting
+  stage_b:
+    type: sklearn_hist_gradient_boosting
+    class_weights:
+      defer_action: 1.5
+      send_information: 1.0
+      send_reminder: 1.8
+calibration:
+  enabled: true
+  method: isotonic
+controller:
+  binary_action_threshold: 0.52
+  min_action_confidence: 0.45
+  min_reminder_confidence: 0.52
+  top2_gap_threshold: 0.08
+  risk_abstain_threshold: 0.7
+guardrails:
+  fatigue_threshold: 0.78
+  intrusion_threshold: 0.72
+  max_touches_7d: 5
+  blocked_channels: []
+  policy_excluded_offers: ["offer_expired"]
+cost_matrix:
+  send_reminder_to_send_information: 3.0
+  defer_action_to_send_information: 2.5
+  do_nothing_to_any_action: 3.0
+ood:
+  enabled: false
+  method: isolation_forest
+evaluation:
+  primary_metric: macro_f1
+  report_calibration: true
+reporting:
+  include_examples: true
+  include_traces: true
+seed_list: [11, 29, 42]

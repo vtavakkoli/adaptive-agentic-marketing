@@ -75,58 +75,52 @@ python -m src.data.prepare --dataset synthetic
 Docker Compose:
 ```bash
 docker compose run --rm app python -m src.training.train_xgboost
-docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_full_framework
+docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_simple
 docker compose run --rm run_experiment
 ```
 
 Equivalent local Python:
 ```bash
 python -m src.training.train_xgboost
-python -m src.pipeline.run_experiment --mode adaptive_full_framework
+python -m src.pipeline.run_experiment --mode adaptive_simple
 ```
 
 `run_experiment` is a convenience Docker Compose service that assumes prepared data already exists, then:
-1. runs `adaptive_full_framework` on the coverage evaluation set, and
+1. runs `adaptive_simple` on the unbiased evaluation set, and
 2. generates experiment reports in `outputs/reports/`.
 
 ## Full end-to-end test
 ```bash
 docker compose run --rm full-test
 ```
-This verifies environment assumptions, picks real-data mode when available (otherwise synthetic mode), preprocesses data, trains XGBoost, builds a **100-case coverage-biased evaluation set derived from the original test split**, runs all experiment modes, calls the host Ollama SLM endpoint, computes metrics, and generates reports.
+This verifies environment assumptions, picks real-data mode when available (otherwise synthetic mode), preprocesses data, trains XGBoost, builds a **100-case unbiased evaluation set derived from the original test split**, runs all experiment modes, calls the host Ollama SLM endpoint, computes metrics, and generates reports.
 
 ### What changed
-- `full-test` now defaults to `FULL_TEST_MODE=coverage`, which runs the **coverage-biased 100-case** evaluation set (`artifacts/coverage_test_set.csv`).
-- Coverage set generation is reproducible with `FULL_TEST_SEED` (default `42`).
+- `full-test` now defaults to `FULL_TEST_MODE=unbiased`, which runs the **unbiased 100-case** evaluation set (`artifacts/unbiased_eval_set.csv`).
+- Unbiased set generation is reproducible with `FULL_TEST_SEED` (default `42`).
 - Original test-set evaluation is still available.
 
-### Coverage-biased 100-case set generation
-The coverage set is built from the original labeled test data (`data/processed/test.csv`) with traceable metadata:
-- controlled perturbations anchored to each source row,
-- threshold/boundary-focused cases (near rule cutoffs),
-- conflict scenarios (for example high need + high fatigue),
-- stratified action/channel sampling,
-- bucket balancing across low/medium/high value bands.
+### Unbiased 100-case set generation
+The unbiased set is sampled from the original labeled test data (`data/processed/test.csv`) using stratified random sampling over `action_class` and `channel` to preserve distributional realism while avoiding augmentation bias.
 
 Each generated row includes:
 - `source_case_id`
-- `augmentation_type`
-- `coverage_bucket`
-- `edge_case_flag`
+- `sample_type` (`unbiased_stratified`)
+- `edge_case_flag` (always `0` for unbiased sampling)
 - `case_id`
 
 ### Run modes
 ```bash
-# default: 100-case coverage-biased evaluation
+# default: 100-case unbiased evaluation
 docker compose run --rm full-test
 
-# explicit coverage mode
+# explicit unbiased mode
 docker compose run --rm full-test-coverage
 
 # evaluate original test split only
 docker compose run --rm full-test-original
 
-# run both original + coverage in one report
+# run both original + unbiased in one report
 docker compose run --rm -e FULL_TEST_MODE=both full-test
 ```
 
@@ -170,3 +164,17 @@ curl -X POST http://localhost:8000/decide -H 'content-type: application/json' -d
 - `outputs/reports/metrics.json`
 - `outputs/reports/summary.csv`
 - `outputs/reports/final_report.html`
+
+
+## Adaptive hierarchical framework (new primary mode)
+
+- Baseline rename: `adaptive_simple` is the previous flat `adaptive_full` implementation.
+- New mode: `adaptive_hierarchical` adds hierarchical Stage A/Stage B selection, cost-sensitive control, calibrated uncertainty fallback, and hard guardrails.
+
+Run the new framework:
+
+```bash
+python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --seeds 3 --report --calibrate
+```
+
+Migration note: internal alias `adaptive_full -> adaptive_simple` remains for compatibility, but reports and CLI now use `adaptive_simple`.
