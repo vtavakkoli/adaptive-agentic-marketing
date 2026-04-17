@@ -10,8 +10,6 @@ import httpx
 from src.utils.logging_utils import append_jsonl_log, configure_logging, log_event
 
 ALLOWED_ACTIONS = {
-    "recommend_offer_a",
-    "recommend_offer_b",
     "send_information",
     "send_reminder",
     "defer_action",
@@ -178,7 +176,8 @@ class OllamaJSONClient:
         confidence = max(0.0, min(1.0, confidence))
 
         raw_no_action = parsed.get("no_action", action == "do_nothing")
-        no_action = normalize_no_action(raw_no_action, selected_action=action)
+        _ = normalize_no_action(raw_no_action, selected_action=action)
+        no_action = action == "do_nothing"
 
         rationale = str(parsed.get("rationale", "")).strip() or "model_response"
 
@@ -193,7 +192,7 @@ class OllamaJSONClient:
         safe_payload = self._sanitize_for_json(payload)
         prompt = (
             "Return strict JSON with keys: selected_action, confidence, no_action, rationale. "
-            "Allowed actions: recommend_offer_a,recommend_offer_b,send_information,send_reminder,defer_action,do_nothing. "
+            "Allowed actions: send_information,send_reminder,defer_action,do_nothing. "
             "Return only JSON without markdown code fences. "
             f"Input={json.dumps(safe_payload, allow_nan=False)}"
         )

@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 
 
 Action = Literal[
-    "recommend_offer_a",
-    "recommend_offer_b",
     "send_information",
     "send_reminder",
     "defer_action",
