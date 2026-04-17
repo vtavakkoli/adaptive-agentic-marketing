@@ -129,7 +129,7 @@ def _build_warnings(metrics: dict[str, dict[str, Any]], summary_df: pd.DataFrame
 
 def _plot_confusion_matrix(output_dir: Path, metrics: dict[str, dict[str, Any]]) -> str | None:
     chosen = None
-    for key in ["adaptive_hierarchical__coverage", "adaptive_hierarchical__original", "adaptive_simple__coverage"]:
+    for key in ["adaptive_hierarchical__unbiased", "adaptive_hierarchical__original", "adaptive_simple__unbiased"]:
         if key in metrics:
             chosen = metrics[key]
             break

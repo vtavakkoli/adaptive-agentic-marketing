@@ -53,19 +53,19 @@ def run_experiment(
 
 
 def _resolve_eval_sets(args: argparse.Namespace) -> dict[str, Path]:
-    if args.evaluation_set == "coverage":
-        return {"coverage": Path(args.coverage_test_path)}
+    if args.evaluation_set in {"coverage", "unbiased"}:
+        return {"unbiased": Path(args.coverage_test_path)}
     if args.evaluation_set == "original":
         return {"original": Path(args.test_path)}
-    return {"original": Path(args.test_path), "coverage": Path(args.coverage_test_path)}
+    return {"original": Path(args.test_path), "unbiased": Path(args.coverage_test_path)}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run adaptive marketing experiments")
     parser.add_argument("--mode", default="adaptive_hierarchical", choices=MODES + ["all", "adaptive_full"])
     parser.add_argument("--test-path", default="data/processed/test.csv")
-    parser.add_argument("--coverage-test-path", default="artifacts/coverage_test_set.csv")
-    parser.add_argument("--evaluation-set", default="coverage", choices=["coverage", "original", "both"])
+    parser.add_argument("--coverage-test-path", default="artifacts/unbiased_eval_set.csv")
+    parser.add_argument("--evaluation-set", default="unbiased", choices=["unbiased", "coverage", "original", "both"])
     parser.add_argument("--config", default="configs/adaptive_hierarchical.yaml")
     parser.add_argument("--dataset-mode", default="synthetic")
     parser.add_argument("--max-rows", type=int, default=None)

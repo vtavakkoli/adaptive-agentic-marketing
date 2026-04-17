@@ -32,7 +32,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       FULL_TEST_MAX_ROWS: ${FULL_TEST_MAX_ROWS:-all}
-      FULL_TEST_MODE: ${FULL_TEST_MODE:-coverage}
+      FULL_TEST_MODE: ${FULL_TEST_MODE:-unbiased}
       FULL_TEST_SEED: ${FULL_TEST_SEED:-42}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -66,7 +66,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
-    command: python -m src.main --full-test --full-test-mode coverage
+    command: python -m src.main --full-test --full-test-mode unbiased
 
   run_experiment:
     build: .
@@ -78,4 +78,4 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
-    command: python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --evaluation-set coverage --report --calibrate
+    command: python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --evaluation-set unbiased --report --calibrate

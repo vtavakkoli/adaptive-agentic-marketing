@@ -25,7 +25,7 @@ def run(cmd: list[str], logger=None, stage: str | None = None) -> None:
         log_event(logger, "full_test_stage_complete", stage=stage)
 
 
-def full_test(max_rows: int | None = None, evaluation_set: str = "coverage", seed: int = 42) -> None:
+def full_test(max_rows: int | None = None, evaluation_set: str = "unbiased", seed: int = 42) -> None:
     logger = configure_logging()
     dunnhumby_dir = Path("data/raw/dunnhumby")
     has_real, _ = validate_dunnhumby(dunnhumby_dir)
@@ -40,9 +40,9 @@ def full_test(max_rows: int | None = None, evaluation_set: str = "coverage", see
         "--input",
         "data/processed/test.csv",
         "--output",
-        "artifacts/coverage_test_set.csv",
+        "artifacts/unbiased_eval_set.csv",
         "--summary-output",
-        "artifacts/coverage_summary.json",
+        "artifacts/unbiased_summary.json",
         "--target-size",
         "100",
         "--seed",
@@ -69,7 +69,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Adaptive agentic marketing main entrypoint")
     parser.add_argument("--full-test", action="store_true")
     parser.add_argument("--max-rows", type=int, default=None)
-    parser.add_argument("--full-test-mode", choices=["coverage", "original", "both"], default=None)
+    parser.add_argument("--full-test-mode", choices=["unbiased", "original", "both"], default=None)
     parser.add_argument("--full-test-original", action="store_true")
     parser.add_argument("--full-test-coverage", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
@@ -87,11 +87,11 @@ def main() -> None:
         if args.full_test_original:
             evaluation_set = "original"
         elif args.full_test_coverage:
-            evaluation_set = "coverage"
+            evaluation_set = "unbiased"
         else:
-            evaluation_set = args.full_test_mode or os.getenv("FULL_TEST_MODE", "coverage").strip().lower()
-            if evaluation_set not in {"coverage", "original", "both"}:
-                raise ValueError("FULL_TEST_MODE must be one of coverage/original/both")
+            evaluation_set = args.full_test_mode or os.getenv("FULL_TEST_MODE", "unbiased").strip().lower()
+            if evaluation_set not in {"unbiased", "original", "both", "coverage"}:
+                raise ValueError("FULL_TEST_MODE must be one of unbiased/original/both")
 
         full_test(max_rows=max_rows, evaluation_set=evaluation_set, seed=seed)
     else:
