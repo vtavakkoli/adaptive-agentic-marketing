@@ -46,25 +46,29 @@ def load_dunnhumby_proxy(raw_dir: Path) -> pd.DataFrame:
     # Convert DAY (integer) to a simulated date for rolling window calculations
     df["date"] = pd.to_datetime("2020-01-01") + pd.to_timedelta(df["DAY"], unit="D")
     
-    # Sort strictly by time to ensure calculations are historically robust (no leakage)
+    # Sort strictly by time to ensure calculations are historically robust
     df = df.sort_values(by=["customer_id", "date"]).reset_index(drop=True)
     
-    # Adding a generic column ensures we avoid KeyError when chaining rolling counts
+    # Adding a generic column ensures we avoid KeyError when chaining groupby.rolling
     df["dummy_count"] = 1
     
-    grouped = df.groupby("customer_id")
+    # Set date as index temporarily for the groupby engine
+    df_idx = df.set_index("date")
+    grouped_idx = df_idx.groupby("customer_id")
+    grouped_orig = df.groupby("customer_id")
     
     # 1. Frequency 7d (Transactions in the trailing 7 days)
-    roll_7d = grouped.rolling("7D", on="date")["dummy_count"].count().reset_index(level=0, drop=True)
-    df["frequency_7d"] = (roll_7d - 1).clip(lower=0).fillna(0)  # -1 to exclude the current transaction
+    # Using .values bypasses Pandas implicit index alignment which fails on duplicate dates
+    roll_7d = grouped_idx["dummy_count"].rolling("7D").count().values
+    df["frequency_7d"] = np.clip(roll_7d - 1, 0, None) 
     
-    # 2. Campaign touches 30d (Using 30-day transaction volume as a behavioral proxy)
-    roll_30d = grouped.rolling("30D", on="date")["dummy_count"].count().reset_index(level=0, drop=True)
-    df["campaign_touches_30d"] = (roll_30d - 1).clip(lower=0).fillna(0)
+    # 2. Campaign touches 30d
+    roll_30d = grouped_idx["dummy_count"].rolling("30D").count().values
+    df["campaign_touches_30d"] = np.clip(roll_30d - 1, 0, None)
     
-    # 3. Average basket value (Historical expanding mean of SALES_VALUE per customer)
+    # 3. Average basket value
     if "SALES_VALUE" in df.columns:
-        df["avg_basket_value"] = grouped["SALES_VALUE"].transform(lambda x: x.shift().expanding().mean()).fillna(10.0)
+        df["avg_basket_value"] = grouped_orig["SALES_VALUE"].transform(lambda x: x.shift().expanding().mean()).fillna(10.0)
     else:
         df["avg_basket_value"] = 10.0
         
@@ -74,17 +78,18 @@ def load_dunnhumby_proxy(raw_dir: Path) -> pd.DataFrame:
     else:
         df["has_disc"] = 0
         
-    df["prior_response_rate"] = grouped["has_disc"].transform(lambda x: x.shift().expanding().mean()).fillna(0.0)
+    df["prior_response_rate"] = grouped_orig["has_disc"].transform(lambda x: x.shift().expanding().mean()).fillna(0.0)
     
     # 5. rolling_response_rate_30d
-    roll_disc_30d = grouped.rolling("30D", on="date")["has_disc"].sum().reset_index(level=0, drop=True)
-    roll_disc_30d_prev = (roll_disc_30d - df["has_disc"]).clip(lower=0)
+    roll_disc_30d = grouped_idx["has_disc"].rolling("30D").sum().values
+    roll_disc_30d_prev = np.clip(roll_disc_30d - df["has_disc"].values, 0, None)
     
-    # Safe division proxy
-    safe_denom = df["campaign_touches_30d"].replace(0, 1)
-    df["rolling_response_rate_30d"] = np.where(df["campaign_touches_30d"] > 0, 
-                                               roll_disc_30d_prev / safe_denom, 
-                                               0.0)
+    safe_denom = np.where(df["campaign_touches_30d"].values == 0, 1, df["campaign_touches_30d"].values)
+    df["rolling_response_rate_30d"] = np.where(
+        df["campaign_touches_30d"].values > 0, 
+        roll_disc_30d_prev / safe_denom, 
+        0.0
+    )
                                                
     # 6. Offer ID and Channel (Deterministically mapped based on actual categorical distributions)
     channels = ["email", "sms", "push"]
@@ -157,8 +162,8 @@ def prepare_dataset(dataset: str, raw_dir: Path, processed_dir: Path) -> dict[st
         "columns": list(df.columns),
         "column_groups": {
             "raw_input_features":[c for c in RAW_INPUT_FEATURES if c in df.columns],
-            "derived_helper_scores":[c for c in DERIVED_HELPER_SCORES if c in df.columns],
-            "final_label":[c for c in FINAL_LABEL_COLUMNS if c in df.columns],
+            "derived_helper_scores": [c for c in DERIVED_HELPER_SCORES if c in df.columns],
+            "final_label": [c for c in FINAL_LABEL_COLUMNS if c in df.columns],
         },
         "labels_are_proxy_policy": True,
         "relabeling_happened_after_split": False,
