@@ -41,6 +41,13 @@ th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; } th { backg
 </ul></section>
 <section><h2>Scientific Validity Warnings</h2>{% if warnings %}{% for w in warnings %}<div class="warn">{{ w }}</div>{% endfor %}{% else %}<div class="ok">No critical validity flags detected in this run.</div>{% endif %}</section>
 <section><h2>Main Result Table</h2>{{ experiments_table }}</section>
+<section><h2>RL Evaluation Results (adaptive_ppo_agent)</h2>
+{% if rl_results_table %}
+{{ rl_results_table }}
+{% else %}
+<div class="warn">No RL evaluation rows were found in this run. Ensure mode includes <code>adaptive_ppo_agent</code> and model checkpoint exists.</div>
+{% endif %}
+</section>
 <section><h2>Diagnostics</h2>{% for fig in figures %}<div class="fig"><img src="{{ fig.file }}" alt="{{ fig.caption }}" /><div>{{ fig.caption }}</div></div>{% endfor %}</section>
 <section><h2>Example Decisions</h2>{% for ex in examples %}<div><span class="badge">true={{ ex.true_label }}</span><span class="badge">pred={{ ex.selected_action }}</span><span class="badge">conf={{ ex.confidence }}</span><span class="badge">stageA={{ ex.stage_a }}</span><span class="badge">stageB={{ ex.stage_b }}</span><span class="badge">guardrail={{ ex.guardrail }}</span><span class="badge">fallback={{ ex.fallback }}</span><div><b>top features:</b> {{ ex.top_features }}</div><div><b>explanation:</b> {{ ex.explanation }}</div></div><hr/>{% endfor %}</section>
 <section><h2>Threats to Validity</h2><ul><li>Proxy label risk may inflate alignment with policy heuristics over true outcomes.</li><li>Uncertainty threshold sensitivity can materially change abstention and defer rates.</li><li>Class definition ambiguity (especially reminder prerequisites) can cap achievable macro F1.</li><li>Distribution shift between offline data and deployment traffic may degrade calibration.</li></ul></section>
@@ -88,6 +95,29 @@ def _build_summary_rows(metrics: dict[str, dict[str, Any]]) -> pd.DataFrame:
     return df
 
 
+def _build_rl_rows(summary_df: pd.DataFrame) -> pd.DataFrame:
+    if summary_df.empty:
+        return pd.DataFrame()
+    rl_df = summary_df[summary_df["mode"] == "adaptive_ppo_agent"].copy()
+    if rl_df.empty:
+        return rl_df
+    preferred_columns = [
+        "evaluation_set",
+        "mode",
+        "macro_f1",
+        "weighted_f1",
+        "multiclass_accuracy",
+        "balanced_accuracy",
+        "ece",
+        "brier",
+        "abstention_rate",
+        "guardrail_override_rate",
+        "latency_total_s",
+    ]
+    cols = [c for c in preferred_columns if c in rl_df.columns]
+    return rl_df[cols].reset_index(drop=True)
+
+
 
 
 def _detect_leakage_risk() -> dict[str, Any]:
@@ -108,6 +138,48 @@ def _plot_grouped_mode_metrics(output_dir: Path, df: pd.DataFrame) -> str | None
     ax.legend(); fig.tight_layout()
     out = output_dir / "grouped_mode_metrics.png"; fig.savefig(out, dpi=220); plt.close(fig)
     return out.name
+
+
+def _plot_rl_ppo_overview(output_dir: Path, df: pd.DataFrame) -> str | None:
+    rl_df = _build_rl_rows(df)
+    if rl_df.empty:
+        return None
+
+    eval_sets = rl_df["evaluation_set"].astype(str).tolist()
+    x = np.arange(len(eval_sets))
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
+    ax_perf, ax_risk = axes
+
+    perf_cols = ["macro_f1", "multiclass_accuracy", "balanced_accuracy"]
+    w = 0.24
+    for i, col in enumerate(perf_cols):
+        vals = rl_df[col].astype(float).to_numpy()
+        ax_perf.bar(x + (i - 1) * w, vals, width=w, label=col, color=PALETTE[i % len(PALETTE)])
+    ax_perf.set_xticks(x)
+    ax_perf.set_xticklabels(eval_sets, rotation=15)
+    ax_perf.set_ylim(0, 1.0)
+    ax_perf.set_title("PPO RL performance by evaluation set")
+    ax_perf.set_ylabel("Score")
+    ax_perf.legend(fontsize=8)
+
+    risk_cols = ["ece", "brier", "abstention_rate", "guardrail_override_rate"]
+    w2 = 0.18
+    for i, col in enumerate(risk_cols):
+        vals = rl_df[col].astype(float).to_numpy()
+        ax_risk.bar(x + (i - 1.5) * w2, vals, width=w2, label=col, color=PALETTE[(i + 2) % len(PALETTE)])
+    ax_risk.set_xticks(x)
+    ax_risk.set_xticklabels(eval_sets, rotation=15)
+    ax_risk.set_ylim(0, 1.0)
+    ax_risk.set_title("PPO RL risk/stability diagnostics")
+    ax_risk.set_ylabel("Rate / error")
+    ax_risk.legend(fontsize=8)
+
+    fig.tight_layout()
+    out = output_dir / "ppo_rl_overview.png"
+    fig.savefig(out, dpi=220)
+    plt.close(fig)
+    return out.name
+
 
 def _build_warnings(metrics: dict[str, dict[str, Any]], summary_df: pd.DataFrame, leakage_status: dict[str, Any]) -> list[str]:
     warnings: list[str] = []
@@ -312,6 +384,7 @@ def write_reports(
     figs = []
     for fn, cap in [
         (_plot_grouped_mode_metrics(output_dir, summary_df), "Grouped mode metrics."),
+        (_plot_rl_ppo_overview(output_dir, summary_df), "PPO RL overview across evaluation sets: performance and risk diagnostics."),
         (_plot_data_bias_check(output_dir, metrics), "Data bias check using true-label class balance across methods/evaluation sets."),
         (_plot_confusion_matrix(output_dir, metrics), "Normalized multiclass confusion matrices for each evaluated method (counts + row normalized)."),
         (_plot_per_class_f1(output_dir, metrics), "Per-class precision/recall/F1 diagnostic focus chart."),
@@ -323,6 +396,7 @@ def write_reports(
 
     display_df = summary_df.copy()
     experiments_table = display_df.to_html(index=False, escape=False)
+    rl_results_df = _build_rl_rows(summary_df)
     html = Template(REPORT_TEMPLATE).render(
         timestamp=datetime.now(timezone.utc).isoformat(),
         dataset_mode=dataset_mode,
@@ -330,6 +404,7 @@ def write_reports(
         version_info="local",
         warnings=warnings,
         experiments_table=experiments_table,
+        rl_results_table=rl_results_df.to_html(index=False, escape=False) if not rl_results_df.empty else "",
         figures=figs,
         examples=_format_examples(example_decisions),
         reproducibility={
