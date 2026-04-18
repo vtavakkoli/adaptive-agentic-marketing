@@ -79,3 +79,13 @@ services:
     volumes:
       - ./:/app
     command: python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --evaluation-set unbiased --report --calibrate
+
+
+  test-features:
+    build: .
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FEATURE_DATASET: ${FEATURE_DATASET:-synthetic}
+    volumes:
+      - ./:/app
+    command: python -u -m src.analysis.feature_analysis --dataset ${FEATURE_DATASET:-synthetic} --output-dir outputs
