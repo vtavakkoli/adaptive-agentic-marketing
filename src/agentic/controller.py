@@ -14,6 +14,9 @@ from src.models.xgboost_module import XGBoostModule
 from src.policy.controller import HierarchicalPolicyController
 from src.policy.guardrails import evaluate_guardrails
 from src.policy.rules_engine import apply_rules
+from src.rl.action_mapping import ACTION_NAME_TO_ID
+from src.rl.state import state_from_row
+from src.rl.state_encoder import encode_state
 
 FINAL_ACTIONS = {
     "do_nothing",
@@ -48,8 +51,9 @@ LEAKAGE_BLOCKLIST = {
 }
 
 MODE_ALIASES = {
-    "adaptive_full": "adaptive_simple",
-    "adaptive_full_framework": "adaptive_simple",
+    "adaptive_full": "adaptive_framework",
+    "adaptive_full_framework": "adaptive_framework",
+    "adaptive_simple": "adaptive_framework",
 }
 
 
@@ -69,6 +73,7 @@ class AdaptiveAgenticController:
             retries=int(policy_cfg.get("slm", {}).get("retries", 2)),
         )
         self.hierarchical = HierarchicalPolicyController(policy_cfg)
+        self._ppo_model: Any | None = None
 
     def _sanitize_features_for_llm(self, features: dict[str, Any]) -> dict[str, Any]:
         sanitized: dict[str, Any] = {}
@@ -162,7 +167,34 @@ class AdaptiveAgenticController:
             "top_features": decision.top_features,
         }
 
-    def decide(self, features: dict[str, Any], mode: str = "adaptive_simple") -> dict[str, Any]:
+    def _load_ppo_model(self) -> Any:
+        if self._ppo_model is not None:
+            return self._ppo_model
+        model_path = Path(self.policy_cfg.get("ppo", {}).get("model_path", "outputs/models/adaptive_ppo_agent.pt"))
+        if not model_path.exists():
+            raise FileNotFoundError(
+                "adaptive_ppo_agent weights not found. Train with `python -m src.rl.train_ppo --train-path data/processed/train.csv --model-path outputs/models/adaptive_ppo_agent.pt`."
+            )
+        from src.models.ppo_policy import PPOPolicyModel
+
+        self._ppo_model = PPOPolicyModel(model_path=model_path, input_dim=16)
+        return self._ppo_model
+
+    def _decide_ppo(self, features: dict[str, Any], scores: dict[str, float]) -> dict[str, Any]:
+        row = build_features(pd.DataFrame([features]), FeatureBuilderConfig()).iloc[0].to_dict()
+        state = state_from_row(row)
+        guard = evaluate_guardrails(row, self.policy_cfg.get("guardrails", {}))
+        mask = [False] * 4
+        for action_name in guard.allowed_actions:
+            mask[ACTION_NAME_TO_ID[action_name]] = True
+        mask[ACTION_NAME_TO_ID["do_nothing"]] = True
+        model = self._load_ppo_model()
+        out = model.predict(encode_state(state), action_mask=pd.Series(mask, dtype=bool).to_numpy(), deterministic=bool(self.policy_cfg.get("ppo", {}).get("deterministic_eval", True)))
+        scores["rl_policy_entropy"] = float(out["policy_entropy"])
+        scores["rl_action_margin"] = float(out["action_margin"])
+        return out
+
+    def decide(self, features: dict[str, Any], mode: str = "adaptive_framework") -> dict[str, Any]:
         mode = MODE_ALIASES.get(mode, mode)
         rule = apply_rules(features, self.policy_cfg.get("rules", {}))
         scores = {
@@ -177,6 +209,15 @@ class AdaptiveAgenticController:
             out = self._decide_hierarchical(features, scores)
             action = out["selected_action"]
             confidence = float(out["confidence"])
+        elif mode == "adaptive_ppo_agent":
+            ppo_out = self._decide_ppo(features, scores)
+            action = ppo_out["selected_action"]
+            confidence = float(ppo_out["confidence"])
+            out = {
+                "policy_entropy": float(ppo_out["policy_entropy"]),
+                "action_margin": float(ppo_out["action_margin"]),
+                "rl_probs": ppo_out["probs"],
+            }
         else:
             action, confidence = self._decide_simple(features, mode, rule, scores)
             out = {}
@@ -184,7 +225,6 @@ class AdaptiveAgenticController:
         if action not in FINAL_ACTIONS:
             action = "defer_action"
 
-        # keep hard guardrail guarantee as final enforcement
         guard = evaluate_guardrails(build_features(pd.DataFrame([features])).iloc[0].to_dict(), self.policy_cfg.get("guardrails", {}))
         if action not in guard.allowed_actions:
             action = "do_nothing" if "do_nothing" in guard.allowed_actions else "defer_action"

@@ -19,8 +19,9 @@ MODES = [
     "rules_only",
     "xgboost_only",
     "slm_only",
-    "adaptive_simple",
+    "adaptive_framework",
     "adaptive_hierarchical",
+    "adaptive_ppo_agent",
     "ablation_no_rules",
     "ablation_no_xgboost",
     "ablation_no_explanation",
@@ -62,7 +63,7 @@ def _resolve_eval_sets(args: argparse.Namespace) -> dict[str, Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run adaptive marketing experiments")
-    parser.add_argument("--mode", default="adaptive_hierarchical", choices=MODES + ["all", "adaptive_full"])
+    parser.add_argument("--mode", default="adaptive_hierarchical", choices=MODES + ["all", "adaptive_full", "adaptive_simple"])
     parser.add_argument("--test-path", default="data/processed/test.csv")
     parser.add_argument("--coverage-test-path", default="artifacts/unbiased_eval_set.csv")
     parser.add_argument("--evaluation-set", default="unbiased", choices=["unbiased", "coverage", "original", "both"])
@@ -97,6 +98,12 @@ def main() -> None:
 
     requested_mode = MODE_ALIASES.get(args.mode, args.mode)
     modes = MODES if requested_mode == "all" else [requested_mode]
+    if "adaptive_ppo_agent" in modes:
+        model_path = Path(cfg.get("ppo", {}).get("model_path", "outputs/models/adaptive_ppo_agent.pt"))
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"Missing adaptive_ppo_agent model at {model_path}. Train it first with: python -m src.rl.train_ppo --train-path data/processed/train.csv --model-path {model_path}"
+            )
     all_metrics: dict[str, dict] = {}
     dataset_summary: dict[str, dict[str, str | int]] = {}
 

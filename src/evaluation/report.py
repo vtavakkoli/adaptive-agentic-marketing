@@ -18,7 +18,7 @@ MODE_ORDER = [
     "rules_only",
     "xgboost_only",
     "slm_only",
-    "adaptive_simple",
+    "adaptive_framework",
     "adaptive_hierarchical",
     "ablation_no_rules",
     "ablation_no_xgboost",
@@ -33,9 +33,9 @@ th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; } th { backg
 </style></head><body>
 <h1>Adaptive Agentic Marketing Evaluation Report</h1>
 <p class="muted"><b>Timestamp:</b> {{ timestamp }} | <b>Dataset mode:</b> {{ dataset_mode }} | <b>Evaluation set:</b> {{ evaluation_set }} | <b>Version:</b> {{ version_info }}</p>
-<section><h2>Executive Summary</h2><p>This report compares adaptive_simple (legacy flat baseline) and adaptive_hierarchical (new staged framework) with calibration, guardrails, and fallback diagnostics.</p></section>
+<section><h2>Executive Summary</h2><p>This report compares adaptive_framework (legacy flat baseline) and adaptive_hierarchical (new staged framework) with calibration, guardrails, and fallback diagnostics.</p></section>
 <section><h2>Architecture</h2><ul>
-<li><b>adaptive_simple</b> = previous flat <code>adaptive_full</code> baseline (migration alias retained internally only).</li>
+<li><b>adaptive_framework</b> = previous flat <code>adaptive_full</code> baseline (migration alias retained internally only).</li>
 <li><b>adaptive_hierarchical</b> = hierarchical Stage A (do_nothing vs action) + Stage B (defer/send_info/send_reminder) with uncertainty-aware fallback.</li>
 <li>Includes class-sensitive policy costs, calibrated confidence usage, and hard policy guardrails before final action emission.</li>
 </ul></section>
@@ -50,8 +50,8 @@ th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; } th { backg
 
 
 def _short_mode(mode: str) -> str:
-    if mode in {"adaptive_full", "adaptive_full_framework"}:
-        return "adaptive_simple"
+    if mode in {"adaptive_full", "adaptive_full_framework", "adaptive_simple"}:
+        return "adaptive_framework"
     return mode
 
 
@@ -123,37 +123,53 @@ def _build_warnings(metrics: dict[str, dict[str, Any]], summary_df: pd.DataFrame
     actions = {a for v in metrics.values() for a in v.get("multiclass", {}).get("labels", [])}
     if "send_reminder" not in actions or "defer_action" not in actions:
         warnings.append("Some action classes are absent in predictions; confusion diagonality claims are limited.")
-    warnings.append("adaptive_simple is the renamed legacy flat baseline; adaptive_hierarchical is the new primary framework.")
+    warnings.append("adaptive_framework is the renamed legacy flat baseline; adaptive_hierarchical is the new primary framework.")
     return warnings
 
 
 def _plot_confusion_matrix(output_dir: Path, metrics: dict[str, dict[str, Any]]) -> str | None:
-    chosen = None
-    for key in ["adaptive_hierarchical__unbiased", "adaptive_hierarchical__original", "adaptive_simple__unbiased"]:
-        if key in metrics:
-            chosen = metrics[key]
-            break
-    if chosen is None and metrics:
-        chosen = next(iter(metrics.values()))
-    if not chosen:
+    panels: list[tuple[str, list[str], np.ndarray]] = []
+    for metric_key in sorted(metrics.keys()):
+        multi = metrics[metric_key].get("multiclass", {})
+        labels = multi.get("labels", [])
+        cm = np.array(multi.get("confusion_matrix", []), dtype=float)
+        if cm.size == 0 or not labels:
+            continue
+        panels.append((metric_key, labels, cm))
+
+    if not panels:
         return None
-    multi = chosen.get("multiclass", {})
-    labels = multi.get("labels", [])
-    cm = np.array(multi.get("confusion_matrix", []), dtype=float)
-    if cm.size == 0:
-        return None
-    row_sums = cm.sum(axis=1, keepdims=True)
-    norm = np.divide(cm, row_sums, out=np.zeros_like(cm), where=row_sums != 0)
-    fig, ax = plt.subplots(figsize=(7, 6))
-    im = ax.imshow(norm, cmap="Blues", vmin=0, vmax=1)
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            ax.text(j, i, f"{int(cm[i,j])}\n({norm[i,j]:.2f})", ha="center", va="center", fontsize=8)
-    ax.set_xticks(np.arange(len(labels))); ax.set_yticks(np.arange(len(labels)))
-    ax.set_xticklabels(labels, fontsize=9); ax.set_yticklabels(labels, fontsize=9)
-    ax.set_xlabel("Predicted"); ax.set_ylabel("True")
-    fig.colorbar(im, ax=ax, fraction=0.046); fig.tight_layout()
-    out = output_dir / "confusion_matrix_multiclass.png"; fig.savefig(out, dpi=220); plt.close(fig)
+
+    n_panels = len(panels)
+    n_cols = min(3, n_panels)
+    n_rows = int(np.ceil(n_panels / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), squeeze=False)
+
+    for idx, (metric_key, labels, cm) in enumerate(panels):
+        ax = axes[idx // n_cols][idx % n_cols]
+        row_sums = cm.sum(axis=1, keepdims=True)
+        norm = np.divide(cm, row_sums, out=np.zeros_like(cm), where=row_sums != 0)
+        im = ax.imshow(norm, cmap="Blues", vmin=0, vmax=1)
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(j, i, f"{int(cm[i,j])}\n({norm[i,j]:.2f})", ha="center", va="center", fontsize=7)
+        ax.set_xticks(np.arange(len(labels)))
+        ax.set_yticks(np.arange(len(labels)))
+        ax.set_xticklabels(labels, fontsize=8, rotation=20)
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+        ax.set_title(metric_key, fontsize=10)
+        fig.colorbar(im, ax=ax, fraction=0.046)
+
+    total_axes = n_rows * n_cols
+    for idx in range(n_panels, total_axes):
+        axes[idx // n_cols][idx % n_cols].axis("off")
+
+    fig.tight_layout()
+    out = output_dir / "confusion_matrix_multiclass.png"
+    fig.savefig(out, dpi=220)
+    plt.close(fig)
     return out.name
 
 
@@ -190,6 +206,70 @@ def _plot_reliability_diagram(output_dir: Path, metrics: dict[str, dict[str, Any
         ax.text(float(row["ece"]) + 0.002, float(row["brier"]) + 0.002, str(row["mode"]), fontsize=8)
     ax.set_xlabel("ECE"); ax.set_ylabel("Brier"); ax.set_title("Calibration diagnostics by mode")
     fig.tight_layout(); out = output_dir / "reliability_diagram.png"; fig.savefig(out, dpi=220); plt.close(fig)
+    return out.name
+
+
+def _plot_data_bias_check(output_dir: Path, metrics: dict[str, dict[str, Any]]) -> str | None:
+    rows: list[dict[str, Any]] = []
+    for metric_key, values in metrics.items():
+        dist_true = values.get("action_class_distribution_true", {})
+        if not dist_true:
+            continue
+        total = float(sum(float(v) for v in dist_true.values()))
+        if total <= 0:
+            continue
+        label = metric_key
+        for action_name, count in dist_true.items():
+            rows.append(
+                {
+                    "metric_key": label,
+                    "action": str(action_name),
+                    "share": float(count) / total,
+                }
+            )
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    pivot = df.pivot_table(index="metric_key", columns="action", values="share", aggfunc="sum", fill_value=0.0)
+    if pivot.empty:
+        return None
+
+    # Bias proxy: larger spread between max/min class share indicates class imbalance.
+    bias_spread = (pivot.max(axis=1) - pivot.min(axis=1)).astype(float)
+    order = bias_spread.sort_values(ascending=False).index.tolist()
+    pivot = pivot.loc[order]
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, max(4.5, len(pivot) * 0.7)))
+    ax_dist, ax_bias = axes
+
+    left = np.zeros(len(pivot), dtype=float)
+    x = np.arange(len(pivot))
+    for i, col in enumerate(pivot.columns):
+        vals = pivot[col].to_numpy(dtype=float)
+        ax_dist.barh(x, vals, left=left, label=col, color=PALETTE[i % len(PALETTE)])
+        left += vals
+    ax_dist.set_yticks(x)
+    ax_dist.set_yticklabels(pivot.index, fontsize=8)
+    ax_dist.set_xlim(0, 1.0)
+    ax_dist.set_xlabel("Class share in true labels")
+    ax_dist.set_title("True-label distribution by method/eval set")
+    ax_dist.legend(loc="lower right", fontsize=7)
+
+    ax_bias.barh(x, bias_spread.loc[pivot.index].to_numpy(), color=PALETTE[5 % len(PALETTE)])
+    ax_bias.set_yticks(x)
+    ax_bias.set_yticklabels([])
+    ax_bias.set_xlim(0, 1.0)
+    ax_bias.set_xlabel("Imbalance spread (max_share - min_share)")
+    ax_bias.set_title("Bias proxy (higher = more imbalanced)")
+    for y, v in enumerate(bias_spread.loc[pivot.index].to_numpy()):
+        ax_bias.text(min(0.98, v + 0.01), y, f"{v:.2f}", va="center", fontsize=8)
+
+    fig.tight_layout()
+    out = output_dir / "data_bias_check.png"
+    fig.savefig(out, dpi=220)
+    plt.close(fig)
     return out.name
 
 
@@ -232,7 +312,8 @@ def write_reports(
     figs = []
     for fn, cap in [
         (_plot_grouped_mode_metrics(output_dir, summary_df), "Grouped mode metrics."),
-        (_plot_confusion_matrix(output_dir, metrics), "Normalized confusion matrix (counts + row normalized)."),
+        (_plot_data_bias_check(output_dir, metrics), "Data bias check using true-label class balance across methods/evaluation sets."),
+        (_plot_confusion_matrix(output_dir, metrics), "Normalized multiclass confusion matrices for each evaluated method (counts + row normalized)."),
         (_plot_per_class_f1(output_dir, metrics), "Per-class precision/recall/F1 diagnostic focus chart."),
         (_plot_reliability_diagram(output_dir, metrics), "Calibration diagnostics (ECE vs Brier)."),
         (_plot_latency_by_mode(output_dir, summary_df), "Latency breakdown by mode."),
