@@ -11,6 +11,30 @@ ACTION_ORDER = [
     "send_reminder",
 ]
 
+RAW_INPUT_FEATURES = [
+    "customer_id",
+    "recency_days",
+    "frequency_7d",
+    "avg_basket_value",
+    "offer_id",
+    "channel",
+    "campaign_touches_30d",
+    "prior_response_rate",
+]
+
+DERIVED_HELPER_SCORES = [
+    "need_score",
+    "fatigue_score",
+    "intrusiveness_risk",
+    "offer_relevance",
+    "no_action_preferred",
+]
+
+FINAL_LABEL_COLUMNS = [
+    "action_class",
+    "label_type",
+]
+
 
 def derive_labels(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -37,4 +61,5 @@ def derive_labels(df: pd.DataFrame) -> pd.DataFrame:
         ["do_nothing", "send_reminder", "send_information"],
         default="defer_action",
     )
+    out["label_type"] = "proxy_policy"
     return out
