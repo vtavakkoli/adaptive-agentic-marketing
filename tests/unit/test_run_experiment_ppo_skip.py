@@ -57,7 +57,7 @@ def test_main_skips_adaptive_ppo_agent_for_mode_all_when_model_missing(tmp_path:
         "all",
         "--evaluation-set",
         "unbiased",
-        "--coverage-test-path",
+        "--diagnostic-test-path",
         str(data_path),
         "--config",
         str(cfg_path),

@@ -11,10 +11,8 @@ def test_model_fit_predict_interface() -> None:
             "avg_basket_value": [10.0, 40.0, 15.0, 90.0],
             "campaign_touches_30d": [1, 8, 4, 0],
             "prior_response_rate": [0.8, 0.2, 0.5, 0.9],
-            "need_score": [0.9, 0.4, 0.5, 0.7],
-            "fatigue_score": [0.1, 0.8, 0.4, 0.1],
-            "intrusiveness_risk": [0.1, 0.9, 0.5, 0.2],
-            "offer_relevance": [0.9, 0.2, 0.6, 0.8],
+            "channel": ["email", "sms", "app", "email"],
+            "offer_id": ["offer_a", "offer_b", "info", "reminder"],
             "no_action_preferred": [0, 1, 0, 0],
         }
     )
