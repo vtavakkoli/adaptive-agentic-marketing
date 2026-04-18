@@ -8,7 +8,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     command: python -m src.main --help
 
   api:
@@ -20,7 +22,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     ports:
       - "8000:8000"
     command: uvicorn src.api.app:app --host 0.0.0.0 --port 8000
@@ -37,7 +41,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     command: python -m src.main --full-test
 
   full-test-original:
@@ -51,7 +57,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     command: python -m src.main --full-test --full-test-mode original
 
   full-test-coverage:
@@ -65,7 +73,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     command: python -m src.main --full-test --full-test-mode unbiased
 
   run_experiment:
@@ -77,7 +87,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     command: python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --evaluation-set unbiased --report --calibrate
 
 
@@ -87,5 +99,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       FEATURE_DATASET: ${FEATURE_DATASET:-synthetic}
     volumes:
-      - ./:/app
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./outputs:/app/outputs
     command: python -u -m src.analysis.feature_analysis --dataset ${FEATURE_DATASET:-synthetic} --output-dir outputs
