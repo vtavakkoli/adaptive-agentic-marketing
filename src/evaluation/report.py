@@ -20,8 +20,11 @@ MODE_ORDER = [
     "slm_only",
     "adaptive_framework",
     "adaptive_hierarchical",
+    "adaptive_ppo_agent",
     "ablation_no_rules",
     "ablation_no_xgboost",
+    "ablation_no_explanation",
+    "ablation_no_content_generation",
 ]
 
 REPORT_TEMPLATE = """
@@ -33,13 +36,18 @@ th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; } th { backg
 </style></head><body>
 <h1>Adaptive Agentic Marketing Evaluation Report</h1>
 <p class="muted"><b>Timestamp:</b> {{ timestamp }} | <b>Dataset mode:</b> {{ dataset_mode }} | <b>Evaluation set:</b> {{ evaluation_set }} | <b>Version:</b> {{ version_info }}</p>
-<section><h2>Executive Summary</h2><p>This report compares adaptive_framework (legacy flat baseline) and adaptive_hierarchical (new staged framework) with calibration, guardrails, and fallback diagnostics.</p></section>
+<section><h2>Executive Summary</h2><p>This report compares adaptive_framework (legacy flat baseline) and adaptive_hierarchical (new staged framework) with calibration, guardrails, and fallback diagnostics. Labels in this benchmark are proxy policy labels derived from synthetic or proxy logic, not direct behavioral ground truth.</p></section>
 <section><h2>Architecture</h2><ul>
 <li><b>adaptive_framework</b> = previous flat <code>adaptive_full</code> baseline (migration alias retained internally only).</li>
 <li><b>adaptive_hierarchical</b> = hierarchical Stage A (do_nothing vs action) + Stage B (defer/send_info/send_reminder) with uncertainty-aware fallback.</li>
 <li>Includes class-sensitive policy costs, calibrated confidence usage, and hard policy guardrails before final action emission.</li>
 </ul></section>
 <section><h2>Scientific Validity Warnings</h2>{% if warnings %}{% for w in warnings %}<div class="warn">{{ w }}</div>{% endfor %}{% else %}<div class="ok">No critical validity flags detected in this run.</div>{% endif %}</section>
+<section><h2>Benchmark Protocol</h2><ul>
+<li>Primary benchmark: held-out original test rows (no rebalancing) for headline performance.</li>
+<li>Balanced diagnostic set: 100 held-out test rows (target 25/class) for class-comparison diagnostics only.</li>
+<li>Diagnostic set is not used as the primary headline score table.</li>
+</ul></section>
 <section><h2>Main Result Table</h2>{{ experiments_table }}</section>
 <section><h2>RL Evaluation Results (adaptive_ppo_agent)</h2>
 {% if rl_results_table %}
@@ -90,7 +98,9 @@ def _build_summary_rows(metrics: dict[str, dict[str, Any]]) -> pd.DataFrame:
         )
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["mode"] = pd.Categorical(df["mode"], categories=MODE_ORDER, ordered=True)
+        extras = [m for m in df["mode"].astype(str).unique().tolist() if m not in MODE_ORDER]
+        category_order = MODE_ORDER + sorted(extras)
+        df["mode"] = pd.Categorical(df["mode"], categories=category_order, ordered=True)
         df = df.sort_values(["evaluation_set", "mode"], na_position="last").reset_index(drop=True)
     return df
 
@@ -195,6 +205,8 @@ def _build_warnings(metrics: dict[str, dict[str, Any]], summary_df: pd.DataFrame
     actions = {a for v in metrics.values() for a in v.get("multiclass", {}).get("labels", [])}
     if "send_reminder" not in actions or "defer_action" not in actions:
         warnings.append("Some action classes are absent in predictions; confusion diagonality claims are limited.")
+    warnings.append("Labels are proxy policy labels, not direct behavioral outcome labels.")
+    warnings.append("Primary headline benchmark should use held-out original test rows; balanced 100-case set is diagnostic only.")
     warnings.append("adaptive_framework is the renamed legacy flat baseline; adaptive_hierarchical is the new primary framework.")
     return warnings
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+from src.features.label_engineering import DERIVED_HELPER_SCORES, FINAL_LABEL_COLUMNS, RAW_INPUT_FEATURES
 from src.features.label_engineering import derive_labels
 from src.data.synthetic import SyntheticConfig, generate_synthetic_dataset
 from src.utils.logging_utils import configure_logging, log_event
@@ -64,8 +65,10 @@ def prepare_dataset(dataset: str, raw_dir: Path, processed_dir: Path) -> dict[st
         if not valid:
             raise FileNotFoundError(f"Missing dunnhumby files: {missing}")
         df = load_dunnhumby_proxy(raw_dir)
+        df["is_synthetic_row"] = 0
     else:
         df = generate_synthetic_dataset(SyntheticConfig(), raw_dir)
+        df["is_synthetic_row"] = 1
 
     df = derive_labels(df)
     train_df, temp_df = train_test_split(df, test_size=0.3, random_state=42)
@@ -87,6 +90,14 @@ def prepare_dataset(dataset: str, raw_dir: Path, processed_dir: Path) -> dict[st
         "dataset": dataset,
         "rows": int(len(df)),
         "columns": list(df.columns),
+        "column_groups": {
+            "raw_input_features": [c for c in RAW_INPUT_FEATURES if c in df.columns],
+            "derived_helper_scores": [c for c in DERIVED_HELPER_SCORES if c in df.columns],
+            "final_label": [c for c in FINAL_LABEL_COLUMNS if c in df.columns],
+        },
+        "labels_are_proxy_policy": True,
+        "relabeling_happened_after_split": False,
+        "synthetic_rows_present": bool(df["is_synthetic_row"].astype(bool).any()),
         "raw_dir": str(raw_dir),
         "processed_dir": str(processed_dir),
     }
