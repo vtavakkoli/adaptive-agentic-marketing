@@ -75,18 +75,18 @@ python -m src.data.prepare --dataset synthetic
 Docker Compose:
 ```bash
 docker compose run --rm app python -m src.training.train_xgboost
-docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_simple
+docker compose run --rm app python -m src.pipeline.run_experiment --mode adaptive_framework
 docker compose run --rm run_experiment
 ```
 
 Equivalent local Python:
 ```bash
 python -m src.training.train_xgboost
-python -m src.pipeline.run_experiment --mode adaptive_simple
+python -m src.pipeline.run_experiment --mode adaptive_framework
 ```
 
 `run_experiment` is a convenience Docker Compose service that assumes prepared data already exists, then:
-1. runs `adaptive_simple` on the unbiased evaluation set, and
+1. runs `adaptive_framework` on the unbiased evaluation set, and
 2. generates experiment reports in `outputs/reports/`.
 
 ## Full end-to-end test
@@ -168,7 +168,7 @@ curl -X POST http://localhost:8000/decide -H 'content-type: application/json' -d
 
 ## Adaptive hierarchical framework (new primary mode)
 
-- Baseline rename: `adaptive_simple` is the previous flat `adaptive_full` implementation.
+- Baseline rename: `adaptive_framework` is the previous flat `adaptive_full` implementation.
 - New mode: `adaptive_hierarchical` adds hierarchical Stage A/Stage B selection, cost-sensitive control, calibrated uncertainty fallback, and hard guardrails.
 
 Run the new framework:
@@ -177,4 +177,37 @@ Run the new framework:
 python -m src.pipeline.run_experiment --mode adaptive_hierarchical --config configs/adaptive_hierarchical.yaml --seeds 3 --report --calibrate
 ```
 
-Migration note: internal alias `adaptive_full -> adaptive_simple` remains for compatibility, but reports and CLI now use `adaptive_simple`.
+Migration note: internal alias `adaptive_full -> adaptive_framework` remains for compatibility, but reports and CLI now use `adaptive_framework`.
+
+## Experimental mode: `adaptive_ppo_agent`
+
+This repository now includes a fully custom deep RL stack in PyTorch for sequential decision-making under a simulated MDP.
+
+### Scientific scope and honesty
+- The source dataset is static/tabular, so PPO is **not** trained on observed trajectories.
+- Instead, PPO is trained in a **custom simulator-based marketing MDP** initialized from processed rows.
+- This is a sequential policy extension for research benchmarking, **not** a direct supervised classifier.
+- Reward composition and transition assumptions are configurable and can materially affect policy behavior.
+
+### Train
+```bash
+python -m src.rl.train_ppo \
+  --train-path data/processed/train.csv \
+  --model-path outputs/models/adaptive_ppo_agent.pt \
+  --timesteps 8000 \
+  --seed 42 \
+  --horizon 8 \
+  --config configs/adaptive_hierarchical.yaml
+```
+
+### Evaluate
+```bash
+python -m src.rl.evaluate_ppo \
+  --eval-path data/processed/test.csv \
+  --model-path outputs/models/adaptive_ppo_agent.pt \
+  --output-path outputs/predictions/adaptive_ppo_agent/eval/predictions.csv \
+  --config configs/adaptive_hierarchical.yaml
+```
+
+### Full test orchestration
+`scripts/full_test.sh` now trains PPO by default; set `ENABLE_PPO=0` to skip.
