@@ -63,7 +63,23 @@ class XGBoostModule:
     def save(self, path: str | Path) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self.model, p)
+        payload = {
+            "model": self.model,
+            "feature_columns": self._feature_columns,
+        }
+        joblib.dump(payload, p)
 
     def load(self, path: str | Path) -> None:
-        self.model = joblib.load(path)
+        loaded = joblib.load(path)
+        if isinstance(loaded, dict) and "model" in loaded:
+            self.model = loaded["model"]
+            self._feature_columns = list(loaded.get("feature_columns", []))
+            return
+
+        # Backward compatibility for older checkpoints that serialized only the model object.
+        self.model = loaded
+        names = list(getattr(self.model, "feature_names_in_", []) or [])
+        if not names:
+            booster = self.model.get_booster()
+            names = list(booster.feature_names or [])
+        self._feature_columns = names
