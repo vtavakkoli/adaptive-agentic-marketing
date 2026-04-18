@@ -101,9 +101,19 @@ def main() -> None:
     if "adaptive_ppo_agent" in modes:
         model_path = Path(cfg.get("ppo", {}).get("model_path", "outputs/models/adaptive_ppo_agent.pt"))
         if not model_path.exists():
-            raise FileNotFoundError(
-                f"Missing adaptive_ppo_agent model at {model_path}. Train it first with: python -m src.rl.train_ppo --train-path data/processed/train.csv --model-path {model_path}"
-            )
+            if requested_mode == "all":
+                modes = [m for m in modes if m != "adaptive_ppo_agent"]
+                log_event(
+                    logger,
+                    "adaptive_ppo_agent_skipped",
+                    reason="missing_model",
+                    model_path=str(model_path),
+                    hint=f"Train first with: python -m src.rl.train_ppo --train-path data/processed/train.csv --model-path {model_path}",
+                )
+            else:
+                raise FileNotFoundError(
+                    f"Missing adaptive_ppo_agent model at {model_path}. Train it first with: python -m src.rl.train_ppo --train-path data/processed/train.csv --model-path {model_path}"
+                )
     all_metrics: dict[str, dict] = {}
     dataset_summary: dict[str, dict[str, str | int]] = {}
 

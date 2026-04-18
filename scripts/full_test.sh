@@ -4,7 +4,7 @@ set -euo pipefail
 python -m src.data.prepare
 python -m src.training.train_xgboost
 
-if [[ "${ENABLE_PPO:-0}" == "1" ]]; then
+if [[ "${ENABLE_PPO:-1}" == "1" ]]; then
   python -m src.rl.train_ppo \
     --train-path data/processed/train.csv \
     --model-path outputs/models/adaptive_ppo_agent.pt \
