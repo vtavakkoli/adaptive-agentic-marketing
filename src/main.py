@@ -33,6 +33,29 @@ def full_test(max_rows: int | None = None, evaluation_set: str = "unbiased", see
     log_event(logger, "full_test_start", dataset=dataset, max_rows=max_rows, evaluation_set=evaluation_set, seed=seed)
     run([sys.executable, "-m", "src.data.prepare", "--dataset", dataset], logger=logger, stage="prepare_dataset")
     run([sys.executable, "-m", "src.training.train_xgboost"], logger=logger, stage="train_xgboost")
+    enable_ppo = os.getenv("FULL_TEST_ENABLE_PPO", "1").strip().lower() not in {"0", "false", "no"}
+    if enable_ppo:
+        run(
+            [
+                sys.executable,
+                "-m",
+                "src.rl.train_ppo",
+                "--train-path",
+                "data/processed/train.csv",
+                "--model-path",
+                "outputs/models/adaptive_ppo_agent.pt",
+                "--timesteps",
+                os.getenv("FULL_TEST_PPO_TIMESTEPS", "4000"),
+                "--seed",
+                str(seed),
+                "--horizon",
+                os.getenv("FULL_TEST_PPO_HORIZON", "8"),
+                "--config",
+                "configs/adaptive_hierarchical.yaml",
+            ],
+            logger=logger,
+            stage="train_adaptive_ppo_agent",
+        )
     run([
         sys.executable,
         "-m",

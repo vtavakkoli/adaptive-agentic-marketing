@@ -210,4 +210,4 @@ python -m src.rl.evaluate_ppo \
 ```
 
 ### Full test orchestration
-Use `ENABLE_PPO=1` to include PPO training in `scripts/full_test.sh`.
+`scripts/full_test.sh` now trains PPO by default; set `ENABLE_PPO=0` to skip.
