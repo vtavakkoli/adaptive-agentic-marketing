@@ -32,6 +32,10 @@ FORBIDDEN_BASE = {
 LEAKY_KEYWORDS = ("label", "target", "action", "outcome", "post", "decision")
 
 
+def _status(message: str) -> None:
+    print(f"[feature-analysis] {message}", flush=True)
+
+
 @dataclass
 class AnalysisTarget:
     name: str
@@ -369,11 +373,14 @@ def _render_html(output_html: Path, context: dict[str, object]) -> None:
 
 
 def run_feature_analysis(processed_dir: Path, raw_dir: Path, dataset: str, output_dir: Path) -> None:
+    _status("starting feature analysis pipeline")
     output_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = output_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
+    _status(f"loading source splits (dataset={dataset})")
     train_df, val_df, paths = _ensure_input_data(processed_dir, raw_dir, dataset)
+    _status(f"loaded train={len(train_df)} rows, val={len(val_df)} rows")
     exclusions = _excluded_columns(train_df)
     excluded = set(exclusions["column"]) if not exclusions.empty else set()
     predictors = [c for c in train_df.columns if c not in excluded]
@@ -382,6 +389,7 @@ def run_feature_analysis(processed_dir: Path, raw_dir: Path, dataset: str, outpu
     if forbidden_in_predictors:
         raise ValueError(f"Forbidden columns leaked into predictors: {forbidden_in_predictors}")
 
+    _status("running feature diagnostics (missing/cardinality/variance/duplicate/drift)")
     feature_summary = _feature_summary(train_df, val_df, predictors)
     feature_summary.to_csv(reports_dir / "feature_summary.csv", index=False)
     exclusions.to_csv(reports_dir / "feature_exclusion_audit.csv", index=False)
@@ -395,19 +403,23 @@ def run_feature_analysis(processed_dir: Path, raw_dir: Path, dataset: str, outpu
         "Test split was intentionally not used for feature selection decisions.",
     ]
 
+    _status(f"running random-forest analyses for targets: {[t.name for t in targets]}")
     for target in targets:
+        _status(f"training target={target.name}")
         tx_train = target.train_df[predictors]
         tx_val = target.val_df[predictors]
         enc_train, enc_val = _encode_features(tx_train, tx_val)
         rf_sum, perm_sum, _seed_level = _rf_rankings(enc_train, enc_val, target.y_train, target.y_val, seed_list)
         family = rf_sum.groupby("family", as_index=False).agg(importance=("importance_mean", "sum")).sort_values("importance", ascending=False)
         rf_sum.to_csv(reports_dir / f"rf_feature_importance_{target.name}.csv", index=False)
+        _status(f"wrote RF artifacts for target={target.name}")
         perm_sum.to_csv(reports_dir / f"rf_permutation_importance_{target.name}.csv", index=False)
 
         target_artifacts[target.name] = {"rf": rf_sum, "perm": perm_sum, "family": family}
         plots[target.name + "_top"] = _plot_top(rf_sum, perm_sum, target.name)
         plots[target.name + "_cum"] = _plot_cumulative(rf_sum, target.name)
 
+    _status("running complementary diagnostics (mutual information + univariate tests)")
     mi = _mutual_info(train_df[predictors], pd.Categorical(train_df["action_class"]))
     uni = _univariate_scores(train_df[predictors], pd.Categorical(train_df["action_class"]))
     agreement = target_artifacts["multiclass"]["rf"][["feature", "rank"]].merge(
@@ -433,12 +445,13 @@ def run_feature_analysis(processed_dir: Path, raw_dir: Path, dataset: str, outpu
         "warnings": warnings,
         "recommendations": recs,
     }
+    _status("rendering HTML report")
     report_path = reports_dir / "feature_analysis.html"
     _render_html(report_path, context)
     # acceptance alias
     (output_dir / "feature.html").write_text(report_path.read_text(encoding="utf-8"), encoding="utf-8")
 
-    print("Feature analysis complete")
+    _status("feature analysis complete")
     print(f"Analyzed dataset path(s): train={paths['train']} val={paths['val']}")
     print(f"Included predictor count: {len(predictors)}")
     print(f"Excluded predictor count: {len(excluded)}")

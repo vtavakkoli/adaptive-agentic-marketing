@@ -88,4 +88,4 @@ services:
       FEATURE_DATASET: ${FEATURE_DATASET:-synthetic}
     volumes:
       - ./:/app
-    command: python -m src.analysis.feature_analysis --dataset ${FEATURE_DATASET:-synthetic} --output-dir outputs
+    command: python -u -m src.analysis.feature_analysis --dataset ${FEATURE_DATASET:-synthetic} --output-dir outputs
