@@ -49,8 +49,13 @@ def load_dunnhumby_proxy(raw_dir: Path) -> pd.DataFrame:
     # Sort strictly by time to ensure calculations are historically robust
     df = df.sort_values(by=["customer_id", "date"]).reset_index(drop=True)
     
-    # Adding a generic column ensures we avoid KeyError when chaining groupby.rolling
+    # --- Base Column Setup (Must be done before creating the indexed DataFrame) ---
     df["dummy_count"] = 1
+    
+    if "RETAIL_DISC" in df.columns:
+        df["has_disc"] = (df["RETAIL_DISC"] < 0).astype(int)
+    else:
+        df["has_disc"] = 0
     
     # Set date as index temporarily for the groupby engine
     df_idx = df.set_index("date")
@@ -73,11 +78,6 @@ def load_dunnhumby_proxy(raw_dir: Path) -> pd.DataFrame:
         df["avg_basket_value"] = 10.0
         
     # 4. Prior response rate (Proxy: frequency of discount usage historically)
-    if "RETAIL_DISC" in df.columns:
-        df["has_disc"] = (df["RETAIL_DISC"] < 0).astype(int)
-    else:
-        df["has_disc"] = 0
-        
     df["prior_response_rate"] = grouped_orig["has_disc"].transform(lambda x: x.shift().expanding().mean()).fillna(0.0)
     
     # 5. rolling_response_rate_30d
@@ -162,8 +162,8 @@ def prepare_dataset(dataset: str, raw_dir: Path, processed_dir: Path) -> dict[st
         "columns": list(df.columns),
         "column_groups": {
             "raw_input_features":[c for c in RAW_INPUT_FEATURES if c in df.columns],
-            "derived_helper_scores": [c for c in DERIVED_HELPER_SCORES if c in df.columns],
-            "final_label": [c for c in FINAL_LABEL_COLUMNS if c in df.columns],
+            "derived_helper_scores":[c for c in DERIVED_HELPER_SCORES if c in df.columns],
+            "final_label":[c for c in FINAL_LABEL_COLUMNS if c in df.columns],
         },
         "labels_are_proxy_policy": True,
         "relabeling_happened_after_split": False,
