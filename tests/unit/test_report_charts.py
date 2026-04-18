@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.evaluation.report import write_reports
+from src.evaluation.report import _build_rl_rows, _build_summary_rows, write_reports
 
 
 def test_write_reports_creates_scientific_artifacts_and_sections(tmp_path: Path) -> None:
@@ -84,3 +84,27 @@ def test_write_reports_creates_scientific_artifacts_and_sections(tmp_path: Path)
     assert "Scientific Validity Warnings" in html
     assert "Threats to Validity" in html
     assert "Reproducibility" in html
+
+
+def test_rl_rows_are_detected_for_adaptive_ppo_agent_mode() -> None:
+    summary = _build_summary_rows(
+        {
+            "adaptive_ppo_agent__diagnostic": {
+                "evaluation_set": "diagnostic",
+                "multiclass": {
+                    "accuracy": 0.5,
+                    "macro_f1": 0.45,
+                    "weighted_f1": 0.47,
+                    "balanced_accuracy": 0.49,
+                },
+                "ece": 0.1,
+                "brier": 0.2,
+                "abstention_rate": 0.0,
+                "guardrail_override_rate": 0.02,
+                "latency_total_s": 0.3,
+            }
+        }
+    )
+    rl_rows = _build_rl_rows(summary)
+    assert not rl_rows.empty
+    assert rl_rows.iloc[0]["mode"] == "adaptive_ppo_agent"

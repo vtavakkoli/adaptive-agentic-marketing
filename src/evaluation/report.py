@@ -20,8 +20,11 @@ MODE_ORDER = [
     "slm_only",
     "adaptive_framework",
     "adaptive_hierarchical",
+    "adaptive_ppo_agent",
     "ablation_no_rules",
     "ablation_no_xgboost",
+    "ablation_no_explanation",
+    "ablation_no_content_generation",
 ]
 
 REPORT_TEMPLATE = """
@@ -95,7 +98,9 @@ def _build_summary_rows(metrics: dict[str, dict[str, Any]]) -> pd.DataFrame:
         )
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["mode"] = pd.Categorical(df["mode"], categories=MODE_ORDER, ordered=True)
+        extras = [m for m in df["mode"].astype(str).unique().tolist() if m not in MODE_ORDER]
+        category_order = MODE_ORDER + sorted(extras)
+        df["mode"] = pd.Categorical(df["mode"], categories=category_order, ordered=True)
         df = df.sort_values(["evaluation_set", "mode"], na_position="last").reset_index(drop=True)
     return df
 
