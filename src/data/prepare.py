@@ -49,14 +49,17 @@ def load_dunnhumby_proxy(raw_dir: Path) -> pd.DataFrame:
     # Sort strictly by time to ensure calculations are historically robust (no leakage)
     df = df.sort_values(by=["customer_id", "date"]).reset_index(drop=True)
     
+    # Adding a generic column ensures we avoid KeyError when chaining rolling counts
+    df["dummy_count"] = 1
+    
     grouped = df.groupby("customer_id")
     
     # 1. Frequency 7d (Transactions in the trailing 7 days)
-    roll_7d = grouped.rolling("7D", on="date")["customer_id"].count().reset_index(level=0, drop=True)
+    roll_7d = grouped.rolling("7D", on="date")["dummy_count"].count().reset_index(level=0, drop=True)
     df["frequency_7d"] = (roll_7d - 1).clip(lower=0).fillna(0)  # -1 to exclude the current transaction
     
     # 2. Campaign touches 30d (Using 30-day transaction volume as a behavioral proxy)
-    roll_30d = grouped.rolling("30D", on="date")["customer_id"].count().reset_index(level=0, drop=True)
+    roll_30d = grouped.rolling("30D", on="date")["dummy_count"].count().reset_index(level=0, drop=True)
     df["campaign_touches_30d"] = (roll_30d - 1).clip(lower=0).fillna(0)
     
     # 3. Average basket value (Historical expanding mean of SALES_VALUE per customer)
@@ -66,14 +69,21 @@ def load_dunnhumby_proxy(raw_dir: Path) -> pd.DataFrame:
         df["avg_basket_value"] = 10.0
         
     # 4. Prior response rate (Proxy: frequency of discount usage historically)
-    df["has_disc"] = (df.get("RETAIL_DISC", 0) < 0).astype(int)
+    if "RETAIL_DISC" in df.columns:
+        df["has_disc"] = (df["RETAIL_DISC"] < 0).astype(int)
+    else:
+        df["has_disc"] = 0
+        
     df["prior_response_rate"] = grouped["has_disc"].transform(lambda x: x.shift().expanding().mean()).fillna(0.0)
     
     # 5. rolling_response_rate_30d
     roll_disc_30d = grouped.rolling("30D", on="date")["has_disc"].sum().reset_index(level=0, drop=True)
     roll_disc_30d_prev = (roll_disc_30d - df["has_disc"]).clip(lower=0)
+    
+    # Safe division proxy
+    safe_denom = df["campaign_touches_30d"].replace(0, 1)
     df["rolling_response_rate_30d"] = np.where(df["campaign_touches_30d"] > 0, 
-                                               roll_disc_30d_prev / df["campaign_touches_30d"], 
+                                               roll_disc_30d_prev / safe_denom, 
                                                0.0)
                                                
     # 6. Offer ID and Channel (Deterministically mapped based on actual categorical distributions)
