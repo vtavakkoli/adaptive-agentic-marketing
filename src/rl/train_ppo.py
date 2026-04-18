@@ -9,10 +9,18 @@ import pandas as pd
 
 from src.config import load_yaml
 from src.rl.environment import MarketingMDP
-from src.rl.ppo import CustomPPOAgent
 from src.rl.reward import RewardWeights
 from src.rl.types import PPOConfig, TransitionConfig
 from src.utils.logging_utils import configure_logging, log_event
+
+
+def _build_ppo_config(ppo_cfg: dict, cli_seed: int, cli_horizon: int) -> PPOConfig:
+    allowed = {
+        k: v
+        for k, v in ppo_cfg.items()
+        if k in PPOConfig.__dataclass_fields__ and k not in {"seed", "horizon"}
+    }
+    return PPOConfig(**allowed, seed=cli_seed, horizon=cli_horizon)
 
 
 def main() -> None:
@@ -32,11 +40,7 @@ def main() -> None:
     train_df = pd.read_csv(args.train_path)
     transition_cfg = TransitionConfig(**ppo_cfg.get("transition", {}))
     reward_weights = RewardWeights(**ppo_cfg.get("reward_weights", {}))
-    ppo_conf = PPOConfig(
-        **{k: v for k, v in ppo_cfg.items() if k in PPOConfig.__dataclass_fields__},
-        seed=args.seed,
-        horizon=args.horizon,
-    )
+    ppo_conf = _build_ppo_config(ppo_cfg=ppo_cfg, cli_seed=args.seed, cli_horizon=args.horizon)
 
     env = MarketingMDP(
         dataset=train_df,
@@ -47,6 +51,8 @@ def main() -> None:
         seed=args.seed,
     )
     input_dim = len(env.encode_state(env.reset(seed=args.seed)))
+    from src.rl.ppo import CustomPPOAgent
+
     agent = CustomPPOAgent(input_dim=input_dim, cfg=ppo_conf)
     metrics = agent.train(env=env, timesteps=args.timesteps)
 
