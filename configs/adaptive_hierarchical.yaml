@@ -49,3 +49,42 @@ reporting:
   include_examples: true
   include_traces: true
 seed_list: [11, 29, 42]
+ppo:
+  seed: 42
+  horizon: 8
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  learning_rate: 0.0003
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+  rollout_steps: 512
+  train_epochs: 6
+  minibatch_size: 64
+  hidden_sizes: [128, 128]
+  model_path: outputs/models/adaptive_ppo_agent.pt
+  deterministic_eval: true
+  reward_weights:
+    conversion: 2.0
+    engagement: 0.8
+    relevance: 0.4
+    fatigue: 0.9
+    intrusiveness: 0.8
+    over_contact: 0.7
+    illegal_action: 3.0
+    unnecessary_action: 1.0
+    abstention: 0.3
+  transition:
+    do_nothing_opportunity_decay: 0.02
+    do_nothing_fatigue_decay: 0.03
+    defer_fatigue_decay: 0.07
+    defer_conversion_decay: 0.02
+    information_relevance_gain: 0.08
+    information_fatigue_increase: 0.06
+    information_intrusion_increase: 0.05
+    reminder_boost: 0.14
+    reminder_fatigue_increase: 0.09
+    reminder_intrusion_increase: 0.08
+    reminder_misuse_penalty: 0.12
+    noise_scale: 0.03
