@@ -209,6 +209,70 @@ def _plot_reliability_diagram(output_dir: Path, metrics: dict[str, dict[str, Any
     return out.name
 
 
+def _plot_data_bias_check(output_dir: Path, metrics: dict[str, dict[str, Any]]) -> str | None:
+    rows: list[dict[str, Any]] = []
+    for metric_key, values in metrics.items():
+        dist_true = values.get("action_class_distribution_true", {})
+        if not dist_true:
+            continue
+        total = float(sum(float(v) for v in dist_true.values()))
+        if total <= 0:
+            continue
+        label = metric_key
+        for action_name, count in dist_true.items():
+            rows.append(
+                {
+                    "metric_key": label,
+                    "action": str(action_name),
+                    "share": float(count) / total,
+                }
+            )
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    pivot = df.pivot_table(index="metric_key", columns="action", values="share", aggfunc="sum", fill_value=0.0)
+    if pivot.empty:
+        return None
+
+    # Bias proxy: larger spread between max/min class share indicates class imbalance.
+    bias_spread = (pivot.max(axis=1) - pivot.min(axis=1)).astype(float)
+    order = bias_spread.sort_values(ascending=False).index.tolist()
+    pivot = pivot.loc[order]
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, max(4.5, len(pivot) * 0.7)))
+    ax_dist, ax_bias = axes
+
+    left = np.zeros(len(pivot), dtype=float)
+    x = np.arange(len(pivot))
+    for i, col in enumerate(pivot.columns):
+        vals = pivot[col].to_numpy(dtype=float)
+        ax_dist.barh(x, vals, left=left, label=col, color=PALETTE[i % len(PALETTE)])
+        left += vals
+    ax_dist.set_yticks(x)
+    ax_dist.set_yticklabels(pivot.index, fontsize=8)
+    ax_dist.set_xlim(0, 1.0)
+    ax_dist.set_xlabel("Class share in true labels")
+    ax_dist.set_title("True-label distribution by method/eval set")
+    ax_dist.legend(loc="lower right", fontsize=7)
+
+    ax_bias.barh(x, bias_spread.loc[pivot.index].to_numpy(), color=PALETTE[5 % len(PALETTE)])
+    ax_bias.set_yticks(x)
+    ax_bias.set_yticklabels([])
+    ax_bias.set_xlim(0, 1.0)
+    ax_bias.set_xlabel("Imbalance spread (max_share - min_share)")
+    ax_bias.set_title("Bias proxy (higher = more imbalanced)")
+    for y, v in enumerate(bias_spread.loc[pivot.index].to_numpy()):
+        ax_bias.text(min(0.98, v + 0.01), y, f"{v:.2f}", va="center", fontsize=8)
+
+    fig.tight_layout()
+    out = output_dir / "data_bias_check.png"
+    fig.savefig(out, dpi=220)
+    plt.close(fig)
+    return out.name
+
+
 def _format_examples(example_decisions: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
     out = []
     for ex in example_decisions[:limit]:
@@ -248,6 +312,7 @@ def write_reports(
     figs = []
     for fn, cap in [
         (_plot_grouped_mode_metrics(output_dir, summary_df), "Grouped mode metrics."),
+        (_plot_data_bias_check(output_dir, metrics), "Data bias check using true-label class balance across methods/evaluation sets."),
         (_plot_confusion_matrix(output_dir, metrics), "Normalized multiclass confusion matrices for each evaluated method (counts + row normalized)."),
         (_plot_per_class_f1(output_dir, metrics), "Per-class precision/recall/F1 diagnostic focus chart."),
         (_plot_reliability_diagram(output_dir, metrics), "Calibration diagnostics (ECE vs Brier)."),
